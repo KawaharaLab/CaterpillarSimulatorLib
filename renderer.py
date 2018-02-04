@@ -132,6 +132,6 @@ class Renderer:
 
 renderer = Renderer()
 file_path = sys.argv[3]
-file_type = sys.argv[4] if len(sys.argv) >= 4 else 'json'
+file_type = sys.argv[4] if len(sys.argv) >= 5 else 'json'
 print("file type: {}".format(file_type))
 renderer.load_simulation(file_path, file_type)
