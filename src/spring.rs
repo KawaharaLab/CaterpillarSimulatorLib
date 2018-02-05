@@ -20,7 +20,7 @@ impl Spring {
     ) -> coordinate::Coordinate {
         // Calculate tension. Positive direction is base -> tip
         let length = (tip - base).norm();
-        let e = (tip - base) / length;
-        e * -self.spring_constant * (length - self.natural_length)
+        let n = (tip - base) / length;
+        n * -self.spring_constant * (length - self.natural_length)
     }
 }

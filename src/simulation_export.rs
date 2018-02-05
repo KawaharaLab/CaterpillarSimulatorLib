@@ -59,7 +59,7 @@ mod tests {
 
     #[test]
     fn test_add_frame() {
-        let mut sim_proc = SimulationProc::new();
+        let sim_proc = SimulationProc::new(Vec::<Object>::new());
         let first: u32 = 0;
         let second: u32 = 1;
 
@@ -94,23 +94,23 @@ mod tests {
             ],
         );
 
-        assert_eq!(sim_proc.frames[&first][0].id, "s0");
-        assert_eq!(sim_proc.frames[&first][0].pos, (0., 0., 0.));
-        assert_eq!(sim_proc.frames[&first][1].id, "s1");
-        assert_eq!(sim_proc.frames[&first][1].pos, (1., 0., 0.));
-        assert_eq!(sim_proc.frames[&first][2].id, "s2");
-        assert_eq!(sim_proc.frames[&first][2].pos, (2., 0., 0.));
+        assert_eq!(sim_proc.frames.borrow()[&first][0].id, "s0");
+        assert_eq!(sim_proc.frames.borrow()[&first][0].pos, (0., 0., 0.));
+        assert_eq!(sim_proc.frames.borrow()[&first][1].id, "s1");
+        assert_eq!(sim_proc.frames.borrow()[&first][1].pos, (1., 0., 0.));
+        assert_eq!(sim_proc.frames.borrow()[&first][2].id, "s2");
+        assert_eq!(sim_proc.frames.borrow()[&first][2].pos, (2., 0., 0.));
 
-        assert_eq!(sim_proc.frames[&second][0].id, "s1");
-        assert_eq!(sim_proc.frames[&second][0].pos, (0., 3., 0.));
-        assert_eq!(sim_proc.frames[&second][1].id, "s2");
-        assert_eq!(sim_proc.frames[&second][1].pos, (0., 4., 0.));
+        assert_eq!(sim_proc.frames.borrow()[&second][0].id, "s1");
+        assert_eq!(sim_proc.frames.borrow()[&second][0].pos, (0., 3., 0.));
+        assert_eq!(sim_proc.frames.borrow()[&second][1].id, "s2");
+        assert_eq!(sim_proc.frames.borrow()[&second][1].pos, (0., 4., 0.));
     }
 
     #[test]
     #[should_panic]
     fn panic_on_frame_order_duplicated() {
-        let mut sim_proc = SimulationProc::new();
+        let sim_proc = SimulationProc::new(Vec::<Object>::new());
         let first: u32 = 0;
 
         sim_proc.add_frame(
@@ -136,7 +136,7 @@ mod tests {
     #[test]
     #[should_panic]
     fn panic_on_frame_order_disturbed() {
-        let mut sim_proc = SimulationProc::new();
+        let mut sim_proc = SimulationProc::new(Vec::<Object>::new());
         let first: u32 = 0;
         let second: u32 = 1;
 
@@ -162,9 +162,18 @@ mod tests {
 
     #[test]
     fn test_save() {
-        let mut sim_proc = SimulationProc::new();
-        sim_proc.add_object("s0".to_string(), 2., (0., 0., 0.));
-        sim_proc.add_object("s1".to_string(), 3., (1., 0., 0.));
+        let sim_proc = SimulationProc::new(
+            vec![
+                ("s0".to_string(), 2., (0., 0., 0.)),
+                ("s1".to_string(), 3., (1., 0., 0.)),
+            ].into_iter()
+                .map(move |(id, r, pos)| Object {
+                    id: id,
+                    rad: r,
+                    pos: pos,
+                })
+                .collect::<Vec<Object>>(),
+        );
 
         let first: u32 = 0;
         let second: u32 = 1;

@@ -16,7 +16,7 @@ mod coordinate;
 mod simulation_export;
 
 use somite::Somite;
-use torsion_spring::TSP;
+use torsion_spring::TorsionSpring;
 
 const CONFIG: caterpillar_config::Config = caterpillar_config::Config {
     somite_mass: 0.3,
@@ -62,7 +62,7 @@ py_class!(class Caterpillar |py| {
             }).collect::<Vec<simulation_export::Object>>()
         );
 
-        let temp_forces = (0..somite_number).map(|i| {
+        let temp_forces = (0..somite_number).map(|_| {
             cell::Cell::new(coordinate::Coordinate::zero())
         }).collect();
 
@@ -188,7 +188,7 @@ impl Caterpillar {
         // add spring and dumper effects
         let sp = spring::Spring::new(CONFIG.sp_k, CONFIG.sp_natural_length);
         let dp = dumper::Dumper::new(CONFIG.dp_c);
-        for i in (0..(self.somites(py).len() - 1)) {
+        for i in 0..(self.somites(py).len() - 1) {
             new_forces[i] += sp.force(
                 self.somites(py)[i + 1].get_position(),
                 self.somites(py)[i].get_position(),
