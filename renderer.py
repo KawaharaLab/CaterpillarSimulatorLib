@@ -42,7 +42,8 @@ class Renderer:
                 self.move_object(n, pos)
         self.end_simulation()
 
-    def _load_json(self, file_path: str) -> dict:
+    @staticmethod
+    def _load_json(file_path: str) -> dict:
         with open(file_path, 'r') as f:
             raw_sim_proc = json.load(f)
         return {
@@ -50,7 +51,8 @@ class Renderer:
             'frames': {int(i): [(o['id'], tuple(o['pos'])) for o in v] for i, v in  raw_sim_proc['frames'].items()}
         }
 
-    def _load_pickle(self, file_path: str) -> dict:
+    @staticmethod
+    def _load_pickle(file_path: str) -> dict:
         with open(file_path, 'rb') as f:
             return pickle.load(f)
 

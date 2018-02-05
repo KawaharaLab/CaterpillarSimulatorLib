@@ -105,10 +105,13 @@ impl Caterpillar {
         self.update_somite_verocities(py, &new_forces);
         self.update_somite_forces(py, &new_forces);
 
-        if self.frame_count(py).get() % (10 as u32) == (0 as u32) {
+        let decimation_span: u32 = 10;
+        if self.frame_count(py).get() % decimation_span == (0 as u32) {
             // save the step into simulation protocol
-            self.simulation_protocol(py)
-                .add_frame(self.frame_count(py).get(), self.build_current_frame(py));
+            self.simulation_protocol(py).add_frame(
+                self.frame_count(py).get() / decimation_span,
+                self.build_current_frame(py),
+            );
         }
         self.frame_count(py).set(self.frame_count(py).get() + 1);
     }
