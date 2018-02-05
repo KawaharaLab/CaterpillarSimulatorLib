@@ -8,14 +8,14 @@ use std::cell;
 use cpython::{PyObject, PyResult, PyString, PyTuple, Python, ToPyObject};
 
 mod somite;
-mod realtime_tunable_spring;
 mod torsion_spring;
+mod spring;
+mod dumper;
 mod caterpillar_config;
 mod coordinate;
 mod simulation_export;
 
 use somite::Somite;
-use realtime_tunable_spring::RTS;
 use torsion_spring::TSP;
 
 const CONFIG: caterpillar_config::Config = caterpillar_config::Config {
@@ -26,7 +26,10 @@ const CONFIG: caterpillar_config::Config = caterpillar_config::Config {
     rts_k: 100.0,
     rts_c: 1.0,
     rts_amp: 0.3,
-    friction_coeff_rate: 10.0,
+    sp_natural_length: 0.7,
+    sp_k: 100.0,
+    dp_c: 1.0,
+    friction_coeff: 1.0,
     time_delta: 0.01,
 };
 
@@ -44,9 +47,13 @@ py_class!(class Caterpillar |py| {
     data somites: Vec<Somite>;
     data simulation_protocol: simulation_export::SimulationProc;
     data frame_count: cell::Cell<u32>;
+    data temp_forces: Vec<cell::Cell<coordinate::Coordinate>>;
     def __new__(_cls, somite_number: usize) -> PyResult<Caterpillar> {
         let somites = (0..somite_number).map(|i| {
-            Somite::new_still_somite(coordinate::Coordinate{x: (i as f64)*2.*CONFIG.somite_radius, y: 0., z: CONFIG.somite_radius})
+            Somite::new_still_somite(
+                CONFIG.somite_radius,
+                coordinate::Coordinate{x: (i as f64)*2.*CONFIG.somite_radius, y: 0., z: CONFIG.somite_radius}
+            )
         }).collect::<Vec<somite::Somite>>();
 
         let simulation_protocol = simulation_export::SimulationProc::new(
@@ -55,7 +62,17 @@ py_class!(class Caterpillar |py| {
             }).collect::<Vec<simulation_export::Object>>()
         );
 
-        Caterpillar::create_instance(py, somites, simulation_protocol, cell::Cell::<u32>::new(0))
+        let temp_forces = (0..somite_number).map(|i| {
+            cell::Cell::new(coordinate::Coordinate::zero())
+        }).collect();
+
+        Caterpillar::create_instance(
+            py,
+            somites,
+            simulation_protocol,
+            cell::Cell::<u32>::new(0),
+            temp_forces,
+        )
     }
     def show_positions(&self) -> PyResult<PyString> {
         let mut position_report = "Positions of somites\n".to_string();
@@ -83,7 +100,11 @@ py_class!(class Caterpillar |py| {
         self.simulation_protocol(py).save(&file_path);
         Ok(py.None())
     }
-
+    def set_force_on_somite(&self, somite_number: usize, force: (f64, f64, f64)) -> PyResult<PyObject> {
+        self.temp_forces(py)[somite_number].set(
+            self.temp_forces(py)[somite_number].get() + coordinate::Coordinate::from_tuple(force));
+        Ok(py.None())
+    }
 });
 
 impl Caterpillar {
@@ -140,7 +161,7 @@ impl Caterpillar {
     fn update_somite_verocities(&self, py: Python, new_forces: &Vec<coordinate::Coordinate>) {
         // update somite verocities based on Velret's method
         // v_{t+1} = v_{t} +  \delta \frac{t (f_{t, x_t} + f_{t+1, x_{t+1}})}{2}
-        for (i, s) in self.somites(py).into_iter().enumerate() {
+        for (i, s) in self.somites(py).iter().enumerate() {
             let new_verocity =
                 s.get_verocity() + (s.get_force() + new_forces[i]) * 0.5 * CONFIG.time_delta;
             s.set_verocity(new_verocity);
@@ -148,22 +169,45 @@ impl Caterpillar {
     }
 
     fn update_somite_forces(&self, py: Python, new_forces: &Vec<coordinate::Coordinate>) {
-        for (i, s) in self.somites(py).into_iter().enumerate() {
+        for (i, s) in self.somites(py).iter().enumerate() {
             s.set_force(new_forces[i]);
         }
     }
 
     fn calculate_force_on_somites(&self, py: Python) -> Vec<coordinate::Coordinate> {
+        let mut new_forces = self.temp_forces(py)
+            .iter()
+            .map(|f| f.replace(coordinate::Coordinate::zero()))
+            .collect::<Vec<coordinate::Coordinate>>();
+
         // calculate resultant force from friction, tension, dumping, etc.
-        let mut new_forces = Vec::<coordinate::Coordinate>::with_capacity(self.somites(py).len());
-        for _ in self.somites(py) {
-            let mut force = coordinate::Coordinate {
-                x: 0.,
-                y: 0.,
-                z: 0.,
-            };
-            new_forces.push(force);
+        for (i, s) in self.somites(py).iter().enumerate() {
+            new_forces[i] += s.calculate_friction(CONFIG.friction_coeff)
         }
+
+        // add spring and dumper effects
+        let sp = spring::Spring::new(CONFIG.sp_k, CONFIG.sp_natural_length);
+        let dp = dumper::Dumper::new(CONFIG.dp_c);
+        for i in (0..(self.somites(py).len() - 1)) {
+            new_forces[i] += sp.force(
+                self.somites(py)[i + 1].get_position(),
+                self.somites(py)[i].get_position(),
+            );
+            new_forces[i + 1] += sp.force(
+                self.somites(py)[i].get_position(),
+                self.somites(py)[i + 1].get_position(),
+            );
+
+            new_forces[i] += dp.force(
+                self.somites(py)[i + 1].get_verocity(),
+                self.somites(py)[i].get_verocity(),
+            );
+            new_forces[i + 1] += dp.force(
+                self.somites(py)[i].get_verocity(),
+                self.somites(py)[i + 1].get_verocity(),
+            );
+        }
+
         new_forces
     }
 }
