@@ -14,6 +14,7 @@ pub struct Config {
     pub dp_c: f64,
     pub horizon_ts_k: f64,
     pub vertical_ts_k: f64,
+    pub realtime_tunable_ts_rom: f64,
     pub friction_coeff: f64,
 }
 
@@ -39,6 +40,8 @@ impl fmt::Display for Config {
              [torsion spring]\n\
              horizon k: {} N/rad\n\
              vertical k: {} N/rad\n\
+             [realtime tunable torsion spring]
+             range of motion: {} rad\n\
              [simulation]\n\
              one time step: {} s",
             self.somite_mass,
@@ -54,7 +57,8 @@ impl fmt::Display for Config {
             self.dp_c,
             self.horizon_ts_k,
             self.vertical_ts_k,
-            self.time_delta
+            self.realtime_tunable_ts_rom,
+            self.time_delta,
         )
     }
 }
