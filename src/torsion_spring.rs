@@ -2,6 +2,8 @@ use std::fmt;
 use std::f64;
 use coordinate;
 
+const EPSILON: f64 = 1.0e-5;
+
 #[derive(Copy, Clone)]
 pub struct TorsionSpring {
     spring_constant: f64,
@@ -32,13 +34,18 @@ impl TorsionSpring {
         // range of target_angle is [0, 2*PI], if it exceeds target_angle % 2*PI will be used
         let vec_bc = center - base;
         let vec_ct = tip - center;
-        self.normal_vector(vec_ct) * -self.spring_constant
-            * (self.angle(vec_bc, vec_ct) - target_angle)
+        let angle_diff = self.angle(vec_bc, vec_ct) - target_angle;
+        if angle_diff.abs() < EPSILON {
+            // take into account numeric error
+            coordinate::Coordinate::zero()
+        } else {
+            self.normal_vector(vec_ct) * -self.spring_constant * angle_diff
+        }
     }
 
     fn normal_vector(&self, v: coordinate::Coordinate) -> coordinate::Coordinate {
         // anti-clock-wise orthogonal vector to v, whose norm is 1
-        self.standard_vector.cross_product(v) / v.norm()
+        self.standard_vector.cross_product(self.project(v)) / self.project(v).norm()
     }
 
     fn angle(&self, v1: coordinate::Coordinate, v2: coordinate::Coordinate) -> f64 {
@@ -46,7 +53,7 @@ impl TorsionSpring {
         if self.sin(v1, v2) >= 0.0 {
             self.cos(v1, v2).acos()
         } else {
-            2. * f64::consts::PI - self.cos(v1, v2).acos()
+            -self.cos(v1, v2).acos()
         }
     }
 
@@ -98,7 +105,7 @@ mod test {
 
     #[test]
     fn test_angle() {
-        let torsion_spring = TorsionSpring::new(
+        let torsion_spring1 = TorsionSpring::new(
             0.,
             coordinate::Coordinate {
                 x: 0.,
@@ -116,6 +123,65 @@ mod test {
             y: -1.,
             z: -2.,
         };
-        assert_eq!(torsion_spring.angle(v1, v2), 1.5 * f64::consts::PI)
+        let angle1 = torsion_spring1.angle(v1, v2);
+        let expected1 = -0.5 * f64::consts::PI;
+        assert!(expected1 - EPSILON < angle1 && angle1 < expected1 + EPSILON);
+
+        let torsion_spring2 = TorsionSpring::new(
+            0.,
+            coordinate::Coordinate {
+                x: 0.,
+                y: 1.,
+                z: 0.,
+            },
+        );
+        let v3 = coordinate::Coordinate {
+            x: 1.,
+            y: 1.,
+            z: 1.,
+        };
+        let v4 = coordinate::Coordinate {
+            x: 2.,
+            y: -1.,
+            z: 0.,
+        };
+        let angle2 = torsion_spring2.angle(v3, v4);
+        let expected2 = 0.25 * f64::consts::PI;
+        assert!(expected2 - EPSILON < angle2 && angle2 < expected2 + EPSILON);
+    }
+
+    #[test]
+    fn test_normal_vector() {
+        let torsion_spring = TorsionSpring::new(
+            0.,
+            coordinate::Coordinate {
+                x: 0.,
+                y: 1.,
+                z: 0.,
+            },
+        );
+        let v = coordinate::Coordinate {
+            x: 1.,
+            y: 2.,
+            z: 1.,
+        };
+        let result = torsion_spring.normal_vector(v);
+        let expected = coordinate::Coordinate {
+            x: 2.0_f64.powf(-0.5),
+            y: 0.,
+            z: -2.0_f64.powf(-0.5),
+        };
+        assert!(
+            expected.x - EPSILON < result.x && result.x < expected.x + EPSILON,
+            format!("result x :{}   expected: {}", result.x, expected.x)
+        );
+        assert!(
+            expected.y - EPSILON < result.y && result.y < expected.y + EPSILON,
+            format!("result y :{}   expected: {}", result.y, expected.y)
+        );
+        assert!(
+            expected.z - EPSILON < result.z && result.z < expected.z + EPSILON,
+            format!("result z :{}   expected: {}", result.z, expected.z)
+        );
     }
 }

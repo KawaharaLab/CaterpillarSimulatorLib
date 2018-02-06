@@ -12,6 +12,8 @@ pub struct Config {
     pub sp_natural_length: f64,
     pub sp_k: f64,
     pub dp_c: f64,
+    pub horizon_ts_k: f64,
+    pub vertical_ts_k: f64,
     pub friction_coeff: f64,
 }
 
@@ -20,22 +22,25 @@ impl fmt::Display for Config {
         write!(
             f,
             "Caterpillar Config\n\
-             somite mass: {}\n\
-             somite radius: {}\n\
-             friction coefficient: {}\n\
+             somite mass: {} kg\n\
+             somite radius: {} m\n\
+             friction coefficient: {} Ns/m\n\
              [rts]\n\
-             k: {}\n\
-             c: {}\n\
-             amp: {}\n\
-             max natural length: {}\n\
-             normal angular verocity: {}\n\
+             k: {} N/m\n\
+             c: {} Ns/m\n\
+             amp: {} m\n\
+             max natural length: {} m\n\
+             normal angular verocity: {} rad/s\n\
              [spring]\n\
-             k: {}\n\
-             natural_length: {}\n\
+             k: {} N/m\n\
+             natural_length: {} m\n\
              [dumper]\n\
-             c: {}\n\
+             c: {} Ns/m\n\
+             [torsion spring]\n\
+             horizon k: {} N/rad\n\
+             vertical k: {} N/rad\n\
              [simulation]\n\
-             one time step: {}sec",
+             one time step: {} s",
             self.somite_mass,
             self.somite_radius,
             self.friction_coeff,
@@ -47,6 +52,8 @@ impl fmt::Display for Config {
             self.sp_k,
             self.sp_natural_length,
             self.dp_c,
+            self.horizon_ts_k,
+            self.vertical_ts_k,
             self.time_delta
         )
     }

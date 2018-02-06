@@ -16,20 +16,22 @@ mod coordinate;
 mod simulation_export;
 
 use somite::Somite;
-use torsion_spring::TorsionSpring;
 
+const GRAVITATIONAL_ACCELERATION: f64 = 9.8065;
 const CONFIG: caterpillar_config::Config = caterpillar_config::Config {
-    somite_mass: 0.3,
+    somite_mass: 0.5,
     somite_radius: 0.35,
-    normal_angular_velocity: 0.35,
-    rts_max_natural_length: std::f64::consts::PI,
+    normal_angular_velocity: std::f64::consts::PI,
+    rts_max_natural_length: 0.7,
     rts_k: 100.0,
     rts_c: 1.0,
     rts_amp: 0.3,
     sp_natural_length: 0.7,
-    sp_k: 100.0,
-    dp_c: 1.0,
-    friction_coeff: 1.0,
+    sp_k: 80.0,
+    dp_c: 10.0,
+    horizon_ts_k: 10.,
+    vertical_ts_k: 6.,
+    friction_coeff: 10.0,
     time_delta: 0.01,
 };
 
@@ -39,9 +41,14 @@ py_module_initializer!(caterpillar, initcaterpillar, PyInit_caterpillar, |py, m|
         "__doc__",
         "This is Rust implementation of caterpillar simulater."
     ));
+    try!(m.add(py, "print_config", py_fn!(py, print_caterpillar_config())));
     try!(m.add_class::<Caterpillar>(py));
     Ok(())
 });
+
+fn print_caterpillar_config(_: Python) -> PyResult<String> {
+    Ok(format!("{}", CONFIG))
+}
 
 py_class!(class Caterpillar |py| {
     data somites: Vec<Somite>;
@@ -52,6 +59,7 @@ py_class!(class Caterpillar |py| {
         let somites = (0..somite_number).map(|i| {
             Somite::new_still_somite(
                 CONFIG.somite_radius,
+                CONFIG.somite_mass,
                 coordinate::Coordinate{x: (i as f64)*2.*CONFIG.somite_radius, y: 0., z: CONFIG.somite_radius}
             )
         }).collect::<Vec<somite::Somite>>();
@@ -153,7 +161,7 @@ impl Caterpillar {
         // x_{t+1} = x_{t} + \delta t v_{t} + 0.5 \delta t^2 f_{t, x_t}
         for s in self.somites(py) {
             let new_position = s.get_position() + s.get_verocity() * CONFIG.time_delta
-                + s.get_force() * 0.5 * CONFIG.time_delta.powi(2);
+                + s.get_force() * 0.5 * CONFIG.time_delta.powi(2) / s.mass;
             s.set_position(new_position);
         }
     }
@@ -162,8 +170,11 @@ impl Caterpillar {
         // update somite verocities based on Velret's method
         // v_{t+1} = v_{t} +  \delta \frac{t (f_{t, x_t} + f_{t+1, x_{t+1}})}{2}
         for (i, s) in self.somites(py).iter().enumerate() {
-            let new_verocity =
-                s.get_verocity() + (s.get_force() + new_forces[i]) * 0.5 * CONFIG.time_delta;
+            let mut new_verocity = s.get_verocity()
+                + (s.get_force() + new_forces[i]) * 0.5 * CONFIG.time_delta / s.mass;
+            if s.is_on_ground() {
+                new_verocity.z = new_verocity.z.max(0.);
+            }
             s.set_verocity(new_verocity);
         }
     }
@@ -175,17 +186,27 @@ impl Caterpillar {
     }
 
     fn calculate_force_on_somites(&self, py: Python) -> Vec<coordinate::Coordinate> {
+        // calculate force from friction, tension, dumping, etc.
+        // collect temporary force applied on somites and reset temp_forces instance variable
         let mut new_forces = self.temp_forces(py)
             .iter()
             .map(|f| f.replace(coordinate::Coordinate::zero()))
             .collect::<Vec<coordinate::Coordinate>>();
 
-        // calculate resultant force from friction, tension, dumping, etc.
+        // gravity force
         for (i, s) in self.somites(py).iter().enumerate() {
-            new_forces[i] += s.calculate_friction(CONFIG.friction_coeff)
+            new_forces[i].z += -GRAVITATIONAL_ACCELERATION * s.mass
         }
 
-        // add spring and dumper effects
+        // frictional force against ground
+        for (i, s) in self.somites(py).iter().enumerate() {
+            if s.is_on_ground() {
+                new_forces[i].x += s.get_verocity().x * -CONFIG.friction_coeff;
+                new_forces[i].y += s.get_verocity().y * -CONFIG.friction_coeff;
+            }
+        }
+
+        // spring and dumper effects
         let sp = spring::Spring::new(CONFIG.sp_k, CONFIG.sp_natural_length);
         let dp = dumper::Dumper::new(CONFIG.dp_c);
         for i in 0..(self.somites(py).len() - 1) {
@@ -208,6 +229,97 @@ impl Caterpillar {
             );
         }
 
-        new_forces
+        // torsion spring
+        let vertical_ts = torsion_spring::TorsionSpring::new(
+            CONFIG.vertical_ts_k,
+            coordinate::Coordinate {
+                x: 0.,
+                y: 1.,
+                z: 0.,
+            },
+        );
+        let horizon_ts = torsion_spring::TorsionSpring::new(
+            CONFIG.horizon_ts_k,
+            coordinate::Coordinate {
+                x: 0.,
+                y: 0.,
+                z: 1.,
+            },
+        );
+        for i in 0..(self.somites(py).len() - 2) {
+            // vertical torsion spring
+            new_forces[i] += vertical_ts.force(
+                self.somites(py)[i + 2].get_position(),
+                self.somites(py)[i + 1].get_position(),
+                self.somites(py)[i].get_position(),
+                0.,
+            );
+
+            new_forces[i + 1] -= vertical_ts.force(
+                self.somites(py)[i + 2].get_position(),
+                self.somites(py)[i + 1].get_position(),
+                self.somites(py)[i].get_position(),
+                0.,
+            );
+
+            new_forces[i + 2] += vertical_ts.force(
+                self.somites(py)[i].get_position(),
+                self.somites(py)[i + 1].get_position(),
+                self.somites(py)[i + 2].get_position(),
+                0.,
+            );
+
+            new_forces[i + 1] -= vertical_ts.force(
+                self.somites(py)[i].get_position(),
+                self.somites(py)[i + 1].get_position(),
+                self.somites(py)[i + 2].get_position(),
+                0.,
+            );
+
+            // horizon torsion spring
+            new_forces[i] += horizon_ts.force(
+                self.somites(py)[i + 2].get_position(),
+                self.somites(py)[i + 1].get_position(),
+                self.somites(py)[i].get_position(),
+                0.,
+            );
+
+            new_forces[i + 1] -= horizon_ts.force(
+                self.somites(py)[i + 2].get_position(),
+                self.somites(py)[i + 1].get_position(),
+                self.somites(py)[i].get_position(),
+                0.,
+            );
+
+            new_forces[i + 2] += horizon_ts.force(
+                self.somites(py)[i].get_position(),
+                self.somites(py)[i + 1].get_position(),
+                self.somites(py)[i + 2].get_position(),
+                0.,
+            );
+
+            new_forces[i + 1] -= horizon_ts.force(
+                self.somites(py)[i].get_position(),
+                self.somites(py)[i + 1].get_position(),
+                self.somites(py)[i + 2].get_position(),
+                0.,
+            );
+        }
+
+        // mask negative z force is a somite is on ground
+        self.mask_force_on_landing(py, new_forces)
+    }
+
+    fn mask_force_on_landing(
+        &self,
+        py: Python,
+        mut forces: Vec<coordinate::Coordinate>,
+    ) -> Vec<coordinate::Coordinate> {
+        for (i, s) in self.somites(py).iter().enumerate() {
+            if s.is_on_ground() {
+                forces[i].z = forces[i].z.max(0.)
+            }
+        }
+        forces
     }
 }

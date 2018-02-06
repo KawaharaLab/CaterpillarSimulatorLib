@@ -7,6 +7,7 @@ pub struct Somite {
     pub verocity: cell::Cell<coordinate::Coordinate>,
     pub force: cell::Cell<coordinate::Coordinate>,
     pub radius: f64,
+    pub mass: f64,
 }
 
 impl fmt::Display for Somite {
@@ -24,6 +25,7 @@ impl fmt::Display for Somite {
 impl Somite {
     pub fn new(
         radius: f64,
+        mass: f64,
         position: coordinate::Coordinate,
         verocity: coordinate::Coordinate,
     ) -> Self {
@@ -36,12 +38,14 @@ impl Somite {
                 z: 0.,
             }),
             radius: radius,
+            mass: mass,
         }
     }
 
-    pub fn new_still_somite(radius: f64, position: coordinate::Coordinate) -> Self {
+    pub fn new_still_somite(radius: f64, mass: f64, position: coordinate::Coordinate) -> Self {
         Self::new(
             radius,
+            mass,
             position,
             coordinate::Coordinate {
                 x: 0.,
@@ -75,11 +79,7 @@ impl Somite {
         self.force.get()
     }
 
-    pub fn calculate_friction(&self, friction_coeff: f64) -> coordinate::Coordinate {
-        if self.position.get().z <= self.radius {
-            self.verocity.get() * -friction_coeff
-        } else {
-            coordinate::Coordinate::zero()
-        }
+    pub fn is_on_ground(&self) -> bool {
+        self.position.get().z <= self.radius
     }
 }
