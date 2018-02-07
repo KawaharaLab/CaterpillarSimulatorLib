@@ -7,7 +7,7 @@ extern crate serde_derive;
 use std::f64;
 use std::cell;
 use std::collections;
-use cpython::{PyObject, PyResult, PyString, PyTuple, Python, ToPyObject};
+use cpython::{PyDict, PyObject, PyResult, PyString, PyTuple, Python, PythonObject, ToPyObject};
 
 mod phase_oscillator;
 mod somite;
@@ -18,26 +18,7 @@ mod caterpillar_config;
 mod coordinate;
 mod simulation_export;
 
-use somite::Somite;
-
 const GRAVITATIONAL_ACCELERATION: f64 = 9.8065;
-const CONFIG: caterpillar_config::Config = caterpillar_config::Config {
-    somite_mass: 0.5,
-    somite_radius: 0.35,
-    normal_angular_velocity: std::f64::consts::PI,
-    rts_max_natural_length: 0.7,
-    rts_k: 100.0,
-    rts_c: 1.0,
-    rts_amp: 0.3,
-    sp_natural_length: 0.7,
-    sp_k: 80.0,
-    dp_c: 10.0,
-    horizon_ts_k: 10.,
-    vertical_ts_k: 200.,
-    realtime_tunable_ts_rom: f64::consts::PI / 6.,
-    friction_coeff: 10.0,
-    time_delta: 0.01,
-};
 
 py_module_initializer!(caterpillar, initcaterpillar, PyInit_caterpillar, |py, m| {
     try!(m.add(
@@ -45,33 +26,35 @@ py_module_initializer!(caterpillar, initcaterpillar, PyInit_caterpillar, |py, m|
         "__doc__",
         "This is Rust implementation of caterpillar simulater."
     ));
-    try!(m.add(py, "print_config", py_fn!(py, print_caterpillar_config())));
     try!(m.add_class::<Caterpillar>(py));
     Ok(())
 });
 
-fn print_caterpillar_config(_: Python) -> PyResult<String> {
-    Ok(format!("{}", CONFIG))
-}
-
 py_class!(class Caterpillar |py| {
-    data somites: Vec<Somite>;
+    data config: caterpillar_config::Config;
+    data somites: Vec<somite::Somite>;
     data simulation_protocol: simulation_export::SimulationProc;
     data frame_count: cell::Cell<u32>;
     data temp_forces: Vec<cell::Cell<coordinate::Coordinate>>;
     data oscillators: collections::HashMap<u32, cell::RefCell<phase_oscillator::PhaseOscillator>>;
-    def __new__(_cls, somite_number: usize, somites_to_set_oscillater: &PyTuple) -> PyResult<Caterpillar> {
+    def __new__(_cls, somite_number: usize, somites_to_set_oscillater: &PyTuple, kwargs: Option<&PyDict>) -> PyResult<Caterpillar> {
+        // parse config
+        let config = match kwargs {
+            Some(kwargs) => Self::parse_config(py, kwargs),
+            None => caterpillar_config::Config::new(),
+        };
+
         let somites = (0..somite_number).map(|i| {
-            Somite::new_still_somite(
-                CONFIG.somite_radius,
-                CONFIG.somite_mass,
-                coordinate::Coordinate{x: (i as f64)*2.*CONFIG.somite_radius, y: 0., z: CONFIG.somite_radius}
+            somite::Somite::new_still_somite(
+                config.somite_radius,
+                config.somite_mass,
+                coordinate::Coordinate{x: (i as f64)*2.*config.somite_radius, y: 0., z: config.somite_radius}
             )
         }).collect::<Vec<somite::Somite>>();
 
         let simulation_protocol = simulation_export::SimulationProc::new(
             somites.iter().enumerate().map(|(i, s)| {
-                simulation_export::Object{id: format!("_somite_{}", i), rad: CONFIG.somite_radius, pos: s.get_position().to_tuple()}
+                simulation_export::Object{id: format!("_somite_{}", i), rad: config.somite_radius, pos: s.get_position().to_tuple()}
             }).collect::<Vec<simulation_export::Object>>()
         );
 
@@ -86,12 +69,16 @@ py_class!(class Caterpillar |py| {
 
         Caterpillar::create_instance(
             py,
+            config,
             somites,
             simulation_protocol,
             cell::Cell::<u32>::new(0),
             temp_forces,
             oscillators,
         )
+    }
+    def print_config(&self) -> PyResult<PyString> {
+        Ok(PyString::new(py, &format!("{}", self.config(py))))
     }
     def show_positions(&self) -> PyResult<PyString> {
         let mut position_report = "Positions of somites\n".to_string();
@@ -103,9 +90,6 @@ py_class!(class Caterpillar |py| {
     def set_positions(&self, somite: usize, x: f64, y: f64, z: f64) -> PyResult<PyObject> {
         self.somites(py)[somite].set_position(coordinate::Coordinate{x:x, y:y, z:z});
         Ok(py.None())
-    }
-    def print_config(&self) -> PyResult<String> {
-        Ok(CONFIG.to_string())
     }
     def center_of_mass(&self) -> PyResult<PyTuple> {
         let center = self.calculate_center_of_mass(py);
@@ -120,28 +104,73 @@ py_class!(class Caterpillar |py| {
             self.temp_forces(py)[somite_number].get() + coordinate::Coordinate::from_tuple(force));
         Ok(py.None())
     }
-    def step(&self) -> PyResult<PyObject> {
+    def step(&self, dt: f64) -> PyResult<PyObject> {
         for (_, oscillator) in self.oscillators(py) {
-            oscillator.borrow_mut().step(CONFIG.normal_angular_velocity, CONFIG.time_delta);
+            oscillator.borrow_mut().step(self.config(py).normal_angular_velocity, dt);
         }
-        self.update_state(py);
+        self.update_state(py, dt);
         Ok(py.None())
     }
-    def step_with_feedback(&self, feedbacks: PyTuple) -> PyResult<PyObject> {
+    def step_with_feedbacks(&self, dt: f64, feedbacks: PyTuple) -> PyResult<PyObject> {
         if feedbacks.len(py) != self.oscillators(py).len() {
             panic!("number of elements in feedbacks and oscillator controllers are inconsistent");
         }
         let mut iter = feedbacks.iter(py);
         for (_, oscillator) in self.oscillators(py) {
-            oscillator.borrow_mut().step(CONFIG.normal_angular_velocity + iter.next().unwrap().extract::<f64>(py).unwrap(), CONFIG.time_delta);
+            oscillator.borrow_mut().step(self.config(py).normal_angular_velocity + iter.next().unwrap().extract::<f64>(py).unwrap(), dt);
         }
 
-        self.update_state(py);
+        self.update_state(py, dt);
         Ok(py.None())
+    }
+    def frictions_x(&self) -> PyResult<PyTuple> {
+        Ok(
+            PyTuple::new(
+                py,
+                self.somites(py).iter().map(|s| {
+                    (s.get_verocity().x * -self.config(py).friction_coeff).into_py_object(py).into_object()
+                }).collect::<Vec<PyObject>>().as_slice()
+            )
+        )
+    }
+    def tensions(&self) -> PyResult<PyTuple> {
+        let sp = spring::Spring::new(self.config(py).sp_k, self.config(py).sp_natural_length);
+        Ok(
+            PyTuple::new(
+                py,
+                (0..(self.somites(py).len() - 1)).map(|i|{
+                    sp.force(
+                        self.somites(py)[i].get_position(),
+                        self.somites(py)[i + 1].get_position(),
+                    ).norm().into_py_object(py).into_object()
+                }).collect::<Vec<PyObject>>().as_slice(),
+            )
+        )
+    }
+    def phases(&self) -> PyResult<PyTuple> {
+        Ok(
+            PyTuple::new(
+                py,
+                self.oscillators(py).values().map(|o| {
+                    o.borrow().get_phase().into_py_object(py).into_object()
+                }).collect::<Vec<PyObject>>().as_slice()
+            )
+        )
     }
 });
 
 impl Caterpillar {
+    fn parse_config(py: Python, kwargs: &PyDict) -> caterpillar_config::Config {
+        let mut config = caterpillar_config::Config::new();
+        for (key, val) in kwargs.items(py) {
+            config.set(
+                key.extract::<String>(py).unwrap().as_ref(),
+                val.extract::<f64>(py).unwrap(),
+            );
+        }
+        config
+    }
+
     fn calculate_center_of_mass(&self, py: Python) -> coordinate::Coordinate {
         let mut sum = coordinate::Coordinate {
             x: 0.,
@@ -154,13 +183,13 @@ impl Caterpillar {
         sum / (self.somites(py).len() as f64)
     }
 
-    fn update_state(&self, py: Python) {
-        self.update_somite_positions(py);
+    fn update_state(&self, py: Python, time_delta: f64) {
+        self.update_somite_positions(py, time_delta);
         let new_forces = self.calculate_force_on_somites(py);
-        self.update_somite_verocities(py, &new_forces);
+        self.update_somite_verocities(py, time_delta, &new_forces);
         self.update_somite_forces(py, &new_forces);
 
-        let decimation_span: u32 = 1;
+        let decimation_span: u32 = 10;
         if self.frame_count(py).get() % decimation_span == (0 as u32) {
             // save the step into simulation protocol
             self.simulation_protocol(py).add_frame(
@@ -182,22 +211,27 @@ impl Caterpillar {
             .collect()
     }
 
-    fn update_somite_positions(&self, py: Python) {
+    fn update_somite_positions(&self, py: Python, time_delta: f64) {
         // update somite positions based on Velret's method
         // x_{t+1} = x_{t} + \delta t v_{t} + 0.5 \delta t^2 f_{t, x_t}
         for s in self.somites(py) {
-            let new_position = s.get_position() + s.get_verocity() * CONFIG.time_delta
-                + s.get_force() * 0.5 * CONFIG.time_delta.powi(2) / s.mass;
+            let new_position = s.get_position() + s.get_verocity() * time_delta
+                + s.get_force() * 0.5 * time_delta.powi(2) / s.mass;
             s.set_position(new_position);
         }
     }
 
-    fn update_somite_verocities(&self, py: Python, new_forces: &Vec<coordinate::Coordinate>) {
+    fn update_somite_verocities(
+        &self,
+        py: Python,
+        time_delta: f64,
+        new_forces: &Vec<coordinate::Coordinate>,
+    ) {
         // update somite verocities based on Velret's method
         // v_{t+1} = v_{t} +  \delta \frac{t (f_{t, x_t} + f_{t+1, x_{t+1}})}{2}
         for (i, s) in self.somites(py).iter().enumerate() {
-            let mut new_verocity = s.get_verocity()
-                + (s.get_force() + new_forces[i]) * 0.5 * CONFIG.time_delta / s.mass;
+            let mut new_verocity =
+                s.get_verocity() + (s.get_force() + new_forces[i]) * 0.5 * time_delta / s.mass;
             if s.is_on_ground() {
                 new_verocity.z = new_verocity.z.max(0.);
             }
@@ -227,14 +261,14 @@ impl Caterpillar {
         // frictional force against ground
         for (i, s) in self.somites(py).iter().enumerate() {
             if s.is_on_ground() {
-                new_forces[i].x += s.get_verocity().x * -CONFIG.friction_coeff;
-                new_forces[i].y += s.get_verocity().y * -CONFIG.friction_coeff;
+                new_forces[i].x += s.get_verocity().x * -self.config(py).friction_coeff;
+                new_forces[i].y += s.get_verocity().y * -self.config(py).friction_coeff;
             }
         }
 
         // spring and dumper effects
-        let sp = spring::Spring::new(CONFIG.sp_k, CONFIG.sp_natural_length);
-        let dp = dumper::Dumper::new(CONFIG.dp_c);
+        let sp = spring::Spring::new(self.config(py).sp_k, self.config(py).sp_natural_length);
+        let dp = dumper::Dumper::new(self.config(py).dp_c);
         for i in 0..(self.somites(py).len() - 1) {
             new_forces[i] += sp.force(
                 self.somites(py)[i + 1].get_position(),
@@ -257,7 +291,7 @@ impl Caterpillar {
 
         // torsion spring
         let vertical_ts = torsion_spring::TorsionSpring::new(
-            CONFIG.vertical_ts_k,
+            self.config(py).vertical_ts_k,
             coordinate::Coordinate {
                 x: 0.,
                 y: 1.,
@@ -265,7 +299,7 @@ impl Caterpillar {
             },
         );
         let horizon_ts = torsion_spring::TorsionSpring::new(
-            CONFIG.horizon_ts_k,
+            self.config(py).horizon_ts_k,
             coordinate::Coordinate {
                 x: 0.,
                 y: 0.,
@@ -274,13 +308,12 @@ impl Caterpillar {
         );
         for i in 0..(self.somites(py).len() - 2) {
             // torsion spring at i+1 th somite
-            let target_angle = Self::phase2torsion_spring_target_angle(
-                self.oscillators(py)
-                    .get(&(i as u32 + 1))
-                    .unwrap()
-                    .borrow()
-                    .get_phase(),
-            );
+            let target_angle = match self.oscillators(py).get(&(i as u32 + 1)) {
+                Some(oscillator) => {
+                    self.phase2torsion_spring_target_angle(py, oscillator.borrow().get_phase())
+                }
+                None => 0.,
+            };
 
             // vertical torsion spring
             new_forces[i] += vertical_ts.force(
@@ -358,7 +391,7 @@ impl Caterpillar {
         forces
     }
 
-    fn phase2torsion_spring_target_angle(phase: f64) -> f64 {
-        CONFIG.realtime_tunable_ts_rom * phase.sin()
+    fn phase2torsion_spring_target_angle(&self, py: Python, phase: f64) -> f64 {
+        self.config(py).realtime_tunable_ts_rom * (phase.cos() - 1.) * 0.5
     }
 }
