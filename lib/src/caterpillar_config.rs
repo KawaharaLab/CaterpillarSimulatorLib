@@ -17,7 +17,9 @@ pub struct Config {
     pub horizon_ts_k: f64,
     pub vertical_ts_k: f64,
     pub realtime_tunable_ts_rom: f64,
-    pub friction_coeff: f64,
+    pub static_friction_coeff: f64,
+    pub dynamic_friction_coeff: f64,
+    pub viscosity_friction_coeff: f64,
 }
 
 impl Config {
@@ -40,8 +42,10 @@ impl Config {
             "horizon_ts_k" => self.horizon_ts_k = val,
             "vertical_ts_k" => self.vertical_ts_k = val,
             "realtime_tunable_ts_rom" => self.realtime_tunable_ts_rom = val,
-            "friction_coeff" => self.friction_coeff = val,
-            _ => {}
+            "static_friction_coeff" => self.static_friction_coeff = val,
+            "dynamic_friction_coeff" => self.dynamic_friction_coeff = val,
+            "viscosity_friction_coeff" => self.viscosity_friction_coeff = val,
+            _ => panic!("invalid config: {}", key),
         };
     }
 }
@@ -63,7 +67,9 @@ impl default::Default for Config {
             horizon_ts_k: 100.,                             // N/m
             vertical_ts_k: 100.,                            // N/m
             realtime_tunable_ts_rom: 0.5 * f64::consts::PI, // rad
-            friction_coeff: 10.,                            // Ns/m
+            static_friction_coeff: 10.,                     //
+            dynamic_friction_coeff: 7.,                     //
+            viscosity_friction_coeff: 5.,                   // Ns/m
         }
     }
 }
@@ -75,7 +81,9 @@ impl fmt::Display for Config {
             "Caterpillar Config\n\
              somite mass: {} kg\n\
              somite radius: {} m\n\
-             friction coefficient: {} Ns/m\n\
+             static friction coefficient: {} Ns/m\n\
+             dynamic friction coefficient: {} Ns/m\n\
+             viscosity friction coefficient: {} \n\
              [rts]\n\
              k: {} N/m\n\
              c: {} Ns/m\n\
@@ -96,7 +104,9 @@ impl fmt::Display for Config {
              one time step: {} s",
             self.somite_mass,
             self.somite_radius,
-            self.friction_coeff,
+            self.static_friction_coeff,
+            self.dynamic_friction_coeff,
+            self.viscosity_friction_coeff,
             self.rts_k,
             self.rts_c,
             self.rts_amp,

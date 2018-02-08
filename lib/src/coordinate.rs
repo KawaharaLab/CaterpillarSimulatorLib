@@ -9,12 +9,12 @@ pub struct Coordinate {
 }
 
 impl Coordinate {
+    pub fn new(x: f64, y: f64, z: f64) -> Self {
+        Coordinate { x: x, y: y, z: z }
+    }
+
     pub fn zero() -> Self {
-        Coordinate {
-            x: 0.,
-            y: 0.,
-            z: 0.,
-        }
+        Self::new(0., 0., 0.)
     }
 
     pub fn to_tuple(&self) -> (f64, f64, f64) {

@@ -136,7 +136,7 @@ mod tests {
     #[test]
     #[should_panic]
     fn panic_on_frame_order_disturbed() {
-        let mut sim_proc = SimulationProc::new(Vec::<Object>::new());
+        let sim_proc = SimulationProc::new(Vec::<Object>::new());
         let first: u32 = 0;
         let second: u32 = 1;
 

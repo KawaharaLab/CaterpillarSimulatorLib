@@ -2,6 +2,8 @@ use std::fmt;
 use std::cell;
 use coordinate;
 
+const EPSILON: f64 = 1.0e-5;
+
 pub struct Somite {
     pub position: cell::Cell<coordinate::Coordinate>,
     pub verocity: cell::Cell<coordinate::Coordinate>,
@@ -79,7 +81,27 @@ impl Somite {
         self.force.get()
     }
 
+    pub fn get_verocity_direction_x(&self) -> f64 {
+        // if v_x > 0, return 1.0
+        // if v_x < 0, return -1.0
+        unsafe { *self.verocity.as_ptr() }.x.signum()
+    }
+
+    pub fn get_verocity_direction_y(&self) -> f64 {
+        // if v_y > 0, return 1.0
+        // if v_y < 0, return -1.0
+        unsafe { *self.verocity.as_ptr() }.y.signum()
+    }
+
     pub fn is_on_ground(&self) -> bool {
         self.position.get().z <= self.radius
+    }
+
+    pub fn is_moving_x(&self) -> bool {
+        unsafe { *self.verocity.as_ptr() }.x.abs() > EPSILON
+    }
+
+    pub fn is_moving_y(&self) -> bool {
+        unsafe { *self.verocity.as_ptr() }.y.abs() > EPSILON
     }
 }

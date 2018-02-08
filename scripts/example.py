@@ -12,9 +12,11 @@ if __name__ == '__main__':
         "horizon_ts_k": 10.,
         "vertical_ts_k": 80.,
         "realtime_tunable_ts_rom": np.pi / 6.,
-        "friction_coeff": 10.0,
+        "static_friction_coeff": 0.7,
+        "dynamic_friction_coeff": 0.1,
+        "viscosity_friction_coeff": 5.0,
     }
-    c = caterpillar.Caterpillar(5, (1,3), caterpillar_params)
+    c = caterpillar.Caterpillar(5, (1,2,3), caterpillar_params)
 
     for _ in range(20):
         c.set_force_on_somite(0, (0, 0, 5))
