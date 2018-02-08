@@ -4,16 +4,19 @@
 ## Install
 
 ```shell:
-cd caterpillar-lib
+git clone https://github.com/KawaharaLab/CaterpillarSimulatorLib.git
+cd CaterpillarSimulatorLib
 python ./setup.py develop
 ```
 
 or, if you are using pyenv, 
 
 ```shell:
-cd caterllar-lib
-sudo pyenv exec python setup.py develop
+pyenv exec python setup.py develop
 ```
+
+Maybe sudo is required.
+
 
 To use the caterpillar simulator in python,
 ```python
