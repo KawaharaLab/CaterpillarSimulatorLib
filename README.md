@@ -1,18 +1,19 @@
 # CaterpillarSimulatorLib
-3D caterpillar simulator for Python implemented in Rust
+3D caterpillar simulator for Python implemented in Rust.
+Currently, only develop mode is supported.
 
 ## Install
 
 ```shell:
 git clone https://github.com/KawaharaLab/CaterpillarSimulatorLib.git
 cd CaterpillarSimulatorLib
-python ./setup.py develop
+pip install -e .
 ```
 
 or, if you are using pyenv, 
 
 ```shell:
-pyenv exec python setup.py develop
+pyenv exec pip install -e .
 ```
 
 Maybe sudo is required.
