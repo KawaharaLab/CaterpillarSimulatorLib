@@ -429,8 +429,8 @@ impl Caterpillar {
                 self.somites(py)[i - 1].get_position()
             };
 
-            let position_diff = somite_position - adj_somite_position;
-            let tan = position_diff.y.abs() / position_diff.x.abs();
+            let position_diff = adj_somite_position - somite_position; // tip should be lower
+            let tan = position_diff.y / position_diff.x;
             if tan > self.config(py).friction_switch_tan {
                 self.config(py).tip_sub_static_friction_coeff
             } else {
@@ -450,8 +450,8 @@ impl Caterpillar {
                 self.somites(py)[i - 1].get_position()
             };
 
-            let position_diff = somite_position - adj_somite_position;
-            let tan = position_diff.y.abs() / position_diff.x.abs();
+            let position_diff = adj_somite_position - somite_position; // tip should be lower
+            let tan = position_diff.y / position_diff.x;
             if tan > self.config(py).friction_switch_tan {
                 self.config(py).tip_sub_dynamic_friction_coeff
             } else {
@@ -471,8 +471,8 @@ impl Caterpillar {
                 self.somites(py)[i - 1].get_position()
             };
 
-            let position_diff = somite_position - adj_somite_position;
-            let tan = position_diff.y.abs() / position_diff.x.abs();
+            let position_diff = adj_somite_position - somite_position; // tip should be lower
+            let tan = position_diff.y / position_diff.x;
             if tan > self.config(py).friction_switch_tan {
                 self.config(py).tip_sub_viscosity_friction_coeff
             } else {
