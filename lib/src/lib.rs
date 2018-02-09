@@ -110,6 +110,9 @@ py_class!(class Caterpillar |py| {
         let center = self.calculate_center_of_mass(py);
         Ok(center.to_tuple().to_py_object(py))
     }
+    def head_position(&self) -> PyResult<PyTuple> {
+        Ok(self.somites(py).last().unwrap().get_position().to_tuple().to_py_object(py))
+    }
     def save_simulation(&self, file_path: String) -> PyResult<PyObject> {
         self.simulation_protocol(py).save(&file_path);
         Ok(py.None())
@@ -404,9 +407,9 @@ impl Caterpillar {
         for (i, s) in self.somites(py).iter().enumerate() {
             if s.is_on_ground() {
                 let friction = friction(
-                    self.config(py).static_friction_coeff,
-                    self.config(py).dynamic_friction_coeff,
-                    self.config(py).viscosity_friction_coeff,
+                    self.static_friction_coeff(py, i),
+                    self.dynamic_friction_coeff(py, i),
+                    self.viscosity_friction_coeff(py, i),
                     s,
                     &forces[i],
                 );
@@ -415,6 +418,75 @@ impl Caterpillar {
             }
         }
         forces
+    }
+
+    fn static_friction_coeff(&self, py: Python, i: usize) -> f64 {
+        let mag = if i == 0 {
+            let position_diff =
+                self.somites(py)[i].get_position() - self.somites(py)[i + 1].get_position();
+            if position_diff.y.abs() / position_diff.x.abs() > 0.4 {
+                0.1
+            } else {
+                1.
+            }
+        } else if i == self.somites(py).len() - 1 {
+            let position_diff =
+                self.somites(py)[i].get_position() - self.somites(py)[i - 1].get_position();
+            if position_diff.y.abs() / position_diff.x.abs() > 0.7 {
+                0.1
+            } else {
+                1.
+            }
+        } else {
+            1.
+        };
+        self.config(py).static_friction_coeff * mag
+    }
+
+    fn dynamic_friction_coeff(&self, py: Python, i: usize) -> f64 {
+        let mag = if i == 0 {
+            let position_diff =
+                self.somites(py)[i].get_position() - self.somites(py)[i + 1].get_position();
+            if position_diff.y.abs() / position_diff.x.abs() > 0.4 {
+                0.1
+            } else {
+                1.
+            }
+        } else if i == self.somites(py).len() - 1 {
+            let position_diff =
+                self.somites(py)[i].get_position() - self.somites(py)[i - 1].get_position();
+            if position_diff.y.abs() / position_diff.x.abs() > 0.4 {
+                0.1
+            } else {
+                1.
+            }
+        } else {
+            1.
+        };
+        self.config(py).dynamic_friction_coeff * mag
+    }
+
+    fn viscosity_friction_coeff(&self, py: Python, i: usize) -> f64 {
+        let mag = if i == 0 {
+            let position_diff =
+                self.somites(py)[i].get_position() - self.somites(py)[i + 1].get_position();
+            if position_diff.y.abs() / position_diff.x.abs() > 0.7 {
+                0.1
+            } else {
+                1.
+            }
+        } else if i == self.somites(py).len() - 1 {
+            let position_diff =
+                self.somites(py)[i].get_position() - self.somites(py)[i - 1].get_position();
+            if position_diff.y.abs() / position_diff.x.abs() > 0.7 {
+                0.1
+            } else {
+                1.
+            }
+        } else {
+            1.
+        };
+        self.config(py).viscosity_friction_coeff * mag
     }
 
     fn phase2torsion_spring_target_angle(&self, py: Python, phase: f64) -> f64 {
