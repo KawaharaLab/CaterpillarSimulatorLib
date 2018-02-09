@@ -421,72 +421,66 @@ impl Caterpillar {
     }
 
     fn static_friction_coeff(&self, py: Python, i: usize) -> f64 {
-        let mag = if i == 0 {
-            let position_diff =
-                self.somites(py)[i].get_position() - self.somites(py)[i + 1].get_position();
-            if position_diff.y.abs() / position_diff.x.abs() > 0.4 {
-                0.1
+        if i == 0 || i == self.somites(py).len() - 1 {
+            let somite_position = self.somites(py)[i].get_position();
+            let adj_somite_position = if i == 0 {
+                self.somites(py)[1].get_position()
             } else {
-                1.
-            }
-        } else if i == self.somites(py).len() - 1 {
-            let position_diff =
-                self.somites(py)[i].get_position() - self.somites(py)[i - 1].get_position();
-            if position_diff.y.abs() / position_diff.x.abs() > 0.7 {
-                0.1
+                self.somites(py)[i - 1].get_position()
+            };
+
+            let position_diff = somite_position - adj_somite_position;
+            let tan = position_diff.y.abs() / position_diff.x.abs();
+            if tan > self.config(py).friction_switch_tan {
+                self.config(py).tip_sub_static_friction_coeff
             } else {
-                1.
+                self.config(py).static_friction_coeff
             }
         } else {
-            1.
-        };
-        self.config(py).static_friction_coeff * mag
+            self.config(py).static_friction_coeff
+        }
     }
 
     fn dynamic_friction_coeff(&self, py: Python, i: usize) -> f64 {
-        let mag = if i == 0 {
-            let position_diff =
-                self.somites(py)[i].get_position() - self.somites(py)[i + 1].get_position();
-            if position_diff.y.abs() / position_diff.x.abs() > 0.4 {
-                0.1
+        if i == 0 || i == self.somites(py).len() - 1 {
+            let somite_position = self.somites(py)[i].get_position();
+            let adj_somite_position = if i == 0 {
+                self.somites(py)[1].get_position()
             } else {
-                1.
-            }
-        } else if i == self.somites(py).len() - 1 {
-            let position_diff =
-                self.somites(py)[i].get_position() - self.somites(py)[i - 1].get_position();
-            if position_diff.y.abs() / position_diff.x.abs() > 0.4 {
-                0.1
+                self.somites(py)[i - 1].get_position()
+            };
+
+            let position_diff = somite_position - adj_somite_position;
+            let tan = position_diff.y.abs() / position_diff.x.abs();
+            if tan > self.config(py).friction_switch_tan {
+                self.config(py).tip_sub_dynamic_friction_coeff
             } else {
-                1.
+                self.config(py).dynamic_friction_coeff
             }
         } else {
-            1.
-        };
-        self.config(py).dynamic_friction_coeff * mag
+            self.config(py).dynamic_friction_coeff
+        }
     }
 
     fn viscosity_friction_coeff(&self, py: Python, i: usize) -> f64 {
-        let mag = if i == 0 {
-            let position_diff =
-                self.somites(py)[i].get_position() - self.somites(py)[i + 1].get_position();
-            if position_diff.y.abs() / position_diff.x.abs() > 0.7 {
-                0.1
+        if i == 0 || i == self.somites(py).len() - 1 {
+            let somite_position = self.somites(py)[i].get_position();
+            let adj_somite_position = if i == 0 {
+                self.somites(py)[1].get_position()
             } else {
-                1.
-            }
-        } else if i == self.somites(py).len() - 1 {
-            let position_diff =
-                self.somites(py)[i].get_position() - self.somites(py)[i - 1].get_position();
-            if position_diff.y.abs() / position_diff.x.abs() > 0.7 {
-                0.1
+                self.somites(py)[i - 1].get_position()
+            };
+
+            let position_diff = somite_position - adj_somite_position;
+            let tan = position_diff.y.abs() / position_diff.x.abs();
+            if tan > self.config(py).friction_switch_tan {
+                self.config(py).tip_sub_viscosity_friction_coeff
             } else {
-                1.
+                self.config(py).viscosity_friction_coeff
             }
         } else {
-            1.
-        };
-        self.config(py).viscosity_friction_coeff * mag
+            self.config(py).viscosity_friction_coeff
+        }
     }
 
     fn phase2torsion_spring_target_angle(&self, py: Python, phase: f64) -> f64 {

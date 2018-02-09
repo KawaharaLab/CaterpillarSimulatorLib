@@ -20,6 +20,10 @@ pub struct Config {
     pub static_friction_coeff: f64,
     pub dynamic_friction_coeff: f64,
     pub viscosity_friction_coeff: f64,
+    pub tip_sub_static_friction_coeff: f64,
+    pub tip_sub_dynamic_friction_coeff: f64,
+    pub tip_sub_viscosity_friction_coeff: f64,
+    pub friction_switch_tan: f64,
 }
 
 impl Config {
@@ -45,6 +49,10 @@ impl Config {
             "static_friction_coeff" => self.static_friction_coeff = val,
             "dynamic_friction_coeff" => self.dynamic_friction_coeff = val,
             "viscosity_friction_coeff" => self.viscosity_friction_coeff = val,
+            "tip_sub_static_friction_coeff" => self.tip_sub_static_friction_coeff = val,
+            "tip_sub_dynamic_friction_coeff" => self.tip_sub_dynamic_friction_coeff = val,
+            "tip_sub_viscosity_friction_coeff" => self.tip_sub_viscosity_friction_coeff = val,
+            "friction_switch_tan" => self.friction_switch_tan = val,
             _ => panic!("invalid config: {}", key),
         };
     }
@@ -70,6 +78,10 @@ impl default::Default for Config {
             static_friction_coeff: 10.,                     //
             dynamic_friction_coeff: 7.,                     //
             viscosity_friction_coeff: 5.,                   // Ns/m
+            tip_sub_static_friction_coeff: 1.,              //
+            tip_sub_dynamic_friction_coeff: 0.7,            //
+            tip_sub_viscosity_friction_coeff: 0.5,          // Ns/m
+            friction_switch_tan: 0.7,                       //
         }
     }
 }
@@ -84,6 +96,10 @@ impl fmt::Display for Config {
              static friction coefficient: {} Ns/m\n\
              dynamic friction coefficient: {} Ns/m\n\
              viscosity friction coefficient: {} \n\
+             tip sub static friction coefficient: {} Ns/m\n\
+             tip sub dynamic friction coefficient: {} Ns/m\n\
+             tip sub viscosity friction coefficient: {} \n\
+             friction switch tan: {} \n\
              [rts]\n\
              k: {} N/m\n\
              c: {} Ns/m\n\
@@ -107,6 +123,10 @@ impl fmt::Display for Config {
             self.static_friction_coeff,
             self.dynamic_friction_coeff,
             self.viscosity_friction_coeff,
+            self.tip_sub_static_friction_coeff,
+            self.tip_sub_dynamic_friction_coeff,
+            self.tip_sub_viscosity_friction_coeff,
+            self.friction_switch_tan,
             self.rts_k,
             self.rts_c,
             self.rts_amp,
