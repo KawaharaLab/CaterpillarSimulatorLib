@@ -39,8 +39,10 @@ py_class!(class Caterpillar |py| {
     data frame_count: cell::Cell<u32>;
     data temp_forces: Vec<cell::Cell<Coordinate>>;
     data oscillators: collections::HashMap<u32, cell::RefCell<phase_oscillator::PhaseOscillator>>;
+    data oscillation_ranges: collections::HashMap<u32, cell::Cell<f64>>;
     data frictional_forces: Vec<cell::Cell<Coordinate>>;
     data target_angles: cell::RefCell<collections::HashMap<u32, f64>>;
+    data torsion_spring_tensions: Vec<cell::Cell<f64>>;
     def __new__(_cls, somite_number: usize, somites_to_set_oscillater: &PyTuple, kwargs: Option<&PyDict>) -> PyResult<Caterpillar> {
         // parse config
         let config = match kwargs {
@@ -73,12 +75,20 @@ py_class!(class Caterpillar |py| {
                 cell::RefCell::<phase_oscillator::PhaseOscillator>::new(phase_oscillator::PhaseOscillator::new())
             );
         }
+        let mut oscillation_ranges = collections::HashMap::<u32, cell::Cell<f64>>::new();
+        for somite_id in somites_to_set_oscillater.iter(py) {
+            oscillation_ranges.insert(somite_id.extract::<u32>(py).unwrap(), cell::Cell::<f64>::new(config.realtime_tunable_ts_rom));
+        }
 
         let initial_frictions = (0..somite_number).map(|_| {
             cell::Cell::new(Coordinate::zero())
         }).collect();
 
         let target_angles = cell::RefCell::<collections::HashMap<u32, f64>>::new(collections::HashMap::<u32, f64>::new());
+
+        let tensions = (0..somite_number-2).map(|_| {
+            cell::Cell::<f64>::new(0.)
+        }).collect::<Vec<cell::Cell<f64>>>();
 
         Caterpillar::create_instance(
             py,
@@ -88,8 +98,10 @@ py_class!(class Caterpillar |py| {
             cell::Cell::<u32>::new(0),
             temp_forces,
             oscillators,
+            oscillation_ranges,
             initial_frictions,
             target_angles,
+            tensions,
         )
     }
     def print_config(&self) -> PyResult<PyString> {
@@ -101,6 +113,16 @@ py_class!(class Caterpillar |py| {
             position_report.push_str(&format!("{}\n", s.to_string()))
         }
         Ok(PyString::new(py, &position_report))
+    }
+    def somite_positions(&self) -> PyResult<PyTuple> {
+        Ok(
+            PyTuple::new(
+                py,
+                self.somites(py).iter().map(|s| {
+                    s.get_position().to_tuple().into_py_object(py).into_object()
+                }).collect::<Vec<PyObject>>().as_slice()
+            )
+        )
     }
     def set_positions(&self, somite: usize, x: f64, y: f64, z: f64) -> PyResult<PyObject> {
         self.somites(py)[somite].set_position(Coordinate{x:x, y:y, z:z});
@@ -122,6 +144,17 @@ py_class!(class Caterpillar |py| {
             self.temp_forces(py)[somite_number].get() + Coordinate::from_tuple(force));
         Ok(py.None())
     }
+    def set_oscillation_ranges(&self, angle_ranges: PyTuple) -> PyResult<PyObject> {
+        if angle_ranges.len(py) != self.oscillators(py).len() {
+            panic!("number of elements in angle_ranges({}) and oscillator controllers({}) are inconsistent",
+                angle_ranges.len(py), self.oscillators(py).len());
+        }
+        let mut range_iter = angle_ranges.iter(py);
+        for (_, range) in self.oscillation_ranges(py) {
+            range.set(range_iter.next().unwrap().extract::<f64>(py).unwrap());
+        }
+        Ok(py.None())
+    }
     def step(&self, dt: f64) -> PyResult<PyObject> {
         for (_, oscillator) in self.oscillators(py) {
             oscillator.borrow_mut().step(self.config(py).normal_angular_velocity, dt);
@@ -137,7 +170,6 @@ py_class!(class Caterpillar |py| {
         for (_, oscillator) in self.oscillators(py) {
             oscillator.borrow_mut().step(self.config(py).normal_angular_velocity + iter.next().unwrap().extract::<f64>(py).unwrap(), dt);
         }
-
         self.update_state(py, dt);
         Ok(py.None())
     }
@@ -163,15 +195,11 @@ py_class!(class Caterpillar |py| {
         )
     }
     def tensions(&self) -> PyResult<PyTuple> {
-        let sp = spring::Spring::new(self.config(py).sp_k, self.config(py).sp_natural_length);
         Ok(
             PyTuple::new(
                 py,
-                (0..(self.somites(py).len() - 1)).map(|i|{
-                    sp.force(
-                        self.somites(py)[i].get_position(),
-                        self.somites(py)[i + 1].get_position(),
-                    ).norm().into_py_object(py).into_object()
+                self.torsion_spring_tensions(py).iter().map(|tension| {
+                    tension.get().into_py_object(py).into_object()
                 }).collect::<Vec<PyObject>>().as_slice(),
             )
         )
@@ -299,16 +327,22 @@ impl Caterpillar {
                 |i| match self.target_angles(py).borrow_mut().remove(&(i as u32)) {
                     Some(target_angle) => target_angle,
                     None => match self.oscillators(py).get(&(i as u32)) {
-                        Some(oscillator) => self.phase2torsion_spring_target_angle(
-                            py,
+                        Some(oscillator) => phase2torsion_spring_target_angle(
                             oscillator.borrow().get_phase(),
+                            self.oscillation_ranges(py).get(&(i as u32)).unwrap().get(),
                         ),
                         None => 0.,
                     },
                 },
             )
             .collect::<Vec<f64>>();
+        let torsion_spring_tensions =
+            self.calculate_torsion_spring_tensions(py, &vertical_ts, &vertical_angles);
+        for (i, tension) in torsion_spring_tensions.into_iter().enumerate() {
+            self.torsion_spring_tensions(py)[i].set(tension);
+        }
         new_forces = self.add_torsion_spring_forces(py, vertical_ts, vertical_angles, new_forces);
+
         new_forces = self.add_frictional_forces(py, new_forces);
 
         self.mask_force_on_landing(py, new_forces)
@@ -403,6 +437,36 @@ impl Caterpillar {
         forces
     }
 
+    fn calculate_torsion_spring_tensions(
+        &self,
+        py: Python,
+        t_spring: &torsion_spring::TorsionSpring,
+        target_angles: &Vec<f64>,
+    ) -> Vec<f64> {
+        // tension i is force applied to torsion spring on i - 1 th somite
+        if target_angles.len() != self.somites(py).len() - 2 {
+            panic!(
+                "target_angles should be somites.len() - 2 = {}, got {}",
+                self.somites(py).len() - 2,
+                target_angles.len()
+            );
+        }
+        let mut tensions = Vec::<f64>::with_capacity(self.somites(py).len() - 2);
+        for i in 1..(self.somites(py).len() - 1) {
+            let b_pos = self.somites(py)[i - 1].get_position();
+            let m_pos = self.somites(py)[i].get_position();
+            let f_pos = self.somites(py)[i + 1].get_position();
+            let target_arg = target_angles[i - 1];
+
+            // torsion spring at i+1 th somite
+            tensions.push(
+                t_spring.angle_sign_to_target(b_pos, m_pos, f_pos, target_arg)
+                    * t_spring.force(b_pos, m_pos, f_pos, target_arg).norm(),
+            );
+        }
+        tensions
+    }
+
     fn add_frictional_forces(&self, py: Python, mut forces: Vec<Coordinate>) -> Vec<Coordinate> {
         for (i, s) in self.somites(py).iter().enumerate() {
             if s.is_on_ground() {
@@ -482,10 +546,10 @@ impl Caterpillar {
             self.config(py).viscosity_friction_coeff
         }
     }
+}
 
-    fn phase2torsion_spring_target_angle(&self, py: Python, phase: f64) -> f64 {
-        self.config(py).realtime_tunable_ts_rom * (1. - phase.cos()) * 0.5
-    }
+fn phase2torsion_spring_target_angle(phase: f64, range: f64) -> f64 {
+    range * (1. - phase.cos()) * 0.5
 }
 
 fn friction(

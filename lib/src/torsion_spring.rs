@@ -43,6 +43,20 @@ impl TorsionSpring {
         }
     }
 
+    pub fn angle_sign_to_target(
+        &self,
+        base: coordinate::Coordinate,
+        center: coordinate::Coordinate,
+        tip: coordinate::Coordinate,
+        target_angle: f64,
+    ) -> f64 {
+        // 1.0 if current angle -> target angle is anti-clock-wise
+        // -1.0 if current angle -> target angle is anti-clock-wise
+        let vec_bc = center - base;
+        let vec_ct = tip - center;
+        (target_angle - self.angle(vec_bc, vec_ct)).signum()
+    }
+
     fn normal_vector(&self, v: coordinate::Coordinate) -> coordinate::Coordinate {
         // anti-clock-wise orthogonal vector to v, whose norm is 1
         self.standard_vector.cross_product(self.project(v)) / self.project(v).norm()
