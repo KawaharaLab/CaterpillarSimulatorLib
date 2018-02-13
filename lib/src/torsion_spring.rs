@@ -6,18 +6,24 @@ const EPSILON: f64 = 1.0e-5;
 
 #[derive(Copy, Clone)]
 pub struct TorsionSpring {
-    spring_constant: f64,
+    spring_constant_k0: f64,
+    spring_constant_k1: f64,
     standard_vector: coordinate::Coordinate, // torsion is calculated within an orthogonal plane to the standard_vector
 }
 
 impl TorsionSpring {
-    pub fn new(spring_constant: f64, standard: coordinate::Coordinate) -> Self {
+    pub fn new(
+        spring_constant_k0: f64,
+        spring_constant_k1: f64,
+        standard: coordinate::Coordinate,
+    ) -> Self {
         let epsilon = 1.0e-10;
         if standard.norm() <= 1. - epsilon || standard.norm() >= 1. + epsilon {
             panic!("norm of standard_vector should be 1.0, {}", standard)
         }
         TorsionSpring {
-            spring_constant: spring_constant,
+            spring_constant_k0: spring_constant_k0,
+            spring_constant_k1: spring_constant_k1,
             standard_vector: standard,
         }
     }
@@ -28,33 +34,75 @@ impl TorsionSpring {
         center: coordinate::Coordinate,
         tip: coordinate::Coordinate,
         target_angle: f64,
-    ) -> coordinate::Coordinate {
-        // calculate torsion force applied on tip, so that Arg(base-center, center-tip) anti-clock-wise to standard_vector becomes target_angular
-        // base and tip are not symmetric, i.e. if you swap base and tip you should modify target_angular to (2*PI - original_target_angle)
-        // range of target_angle is [0, 2*PI], if it exceeds target_angle % 2*PI will be used
+    ) -> (coordinate::Coordinate, coordinate::Coordinate) {
+        // calculate torsion force applied on tip and base, so that Arg(base-center, center-tip) anti-clock-wise to standard_vector becomes target_angular.
+        // force applied on tip and base is or symmetrical.
+        // base and tip are not symmetric, i.e. if you swap base and tip you should modify target_angular to (2*PI - original_target_angle).
+        // range of target_angle is [0, 2*PI], if it exceeds target_angle % 2*PI will be used.
         let vec_bc = center - base;
         let vec_ct = tip - center;
         let angle_diff = self.angle(vec_bc, vec_ct) - target_angle;
         if angle_diff.abs() < EPSILON {
             // take into account numeric error
-            coordinate::Coordinate::zero()
+            (
+                coordinate::Coordinate::zero(),
+                coordinate::Coordinate::zero(),
+            )
         } else {
-            self.normal_vector(vec_ct) * -self.spring_constant * angle_diff
+            (
+                self.normal_vector(vec_ct) * -self.calculate_spring_constant(angle_diff)
+                    * angle_diff,
+                self.normal_vector(vec_bc) * -self.calculate_spring_constant(angle_diff)
+                    * angle_diff,
+            )
         }
     }
 
-    pub fn angle_sign_to_target(
+    pub fn force_on_discrepancy(
         &self,
         base: coordinate::Coordinate,
         center: coordinate::Coordinate,
         tip: coordinate::Coordinate,
-        target_angle: f64,
+        discrepancy_angle_angle: f64,
+    ) -> (coordinate::Coordinate, coordinate::Coordinate) {
+        // calculate torsion force applied on tip and base, so that discrepancy_angle_angle becomse zero.
+        // discrepancy_angle is angle from actual position to target position.
+        // force applied on tip and base is or symmetrical.
+        // base and tip are not symmetric, i.e. if you swap base and tip you should modify target_angular to (2*PI - original_target_angle).
+        // range of target_angle is [0, 2*PI], if it exceeds target_angle % 2*PI will be used.
+        let vec_bc = center - base;
+        let vec_ct = tip - center;
+        if discrepancy_angle_angle < EPSILON {
+            // take into account numeric error
+            (
+                coordinate::Coordinate::zero(),
+                coordinate::Coordinate::zero(),
+            )
+        } else {
+            (
+                self.normal_vector(vec_ct) * self.calculate_spring_constant(discrepancy_angle_angle)
+                    * discrepancy_angle_angle, // no minus since discrepancy_angle is from actual to target position
+                self.normal_vector(vec_bc) * self.calculate_spring_constant(discrepancy_angle_angle)
+                    * discrepancy_angle_angle,
+            )
+        }
+    }
+
+    pub fn current_angle(
+        &self,
+        base: coordinate::Coordinate,
+        center: coordinate::Coordinate,
+        tip: coordinate::Coordinate,
     ) -> f64 {
         // 1.0 if current angle -> target angle is anti-clock-wise
         // -1.0 if current angle -> target angle is anti-clock-wise
         let vec_bc = center - base;
         let vec_ct = tip - center;
-        (target_angle - self.angle(vec_bc, vec_ct)).signum()
+        self.angle(vec_bc, vec_ct)
+    }
+
+    fn calculate_spring_constant(&self, target_angle: f64) -> f64 {
+        self.spring_constant_k0 + self.spring_constant_k1 * target_angle.abs()
     }
 
     fn normal_vector(&self, v: coordinate::Coordinate) -> coordinate::Coordinate {
@@ -94,8 +142,8 @@ impl fmt::Display for TorsionSpring {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(
             f,
-            "TorsionSpring   spring constant: {}",
-            self.spring_constant
+            "TorsionSpring   spring constant k0: {}   k1: {}",
+            self.spring_constant_k0, self.spring_constant_k1
         )
     }
 }

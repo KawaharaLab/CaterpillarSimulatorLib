@@ -309,39 +309,60 @@ impl Caterpillar {
         );
         new_forces = self.add_dumper_forces(py, self.config(py).dp_c, new_forces);
 
-        let horizon_ts = torsion_spring::TorsionSpring::new(
-            self.config(py).horizon_ts_k,
-            Coordinate::new(0., 0., 1.),
-        );
-        let horizon_angles = (1..self.somites(py).len() - 1)
-            .map(|_| 0.)
-            .collect::<Vec<f64>>();
-        new_forces = self.add_torsion_spring_forces(py, horizon_ts, horizon_angles, new_forces);
-
+        // vertical torsion force comming from material mechanical
         let vertical_ts = torsion_spring::TorsionSpring::new(
-            self.config(py).vertical_ts_k,
+            self.config(py).vertical_ts_k0,
+            self.config(py).vertical_ts_k1,
             Coordinate::new(0., 1., 0.),
         );
-        let vertical_angles = (1..self.somites(py).len() - 1)
-            .map(
-                |i| match self.target_angles(py).borrow_mut().remove(&(i as u32)) {
-                    Some(target_angle) => target_angle,
+        let zero_angles = (1..self.somites(py).len() - 1)
+            .map(|_| 0.)
+            .collect::<Vec<f64>>();
+        new_forces = self.add_torsion_spring_forces(py, vertical_ts, zero_angles, new_forces);
+
+        // vertical torsion force comming from actuator
+        let vertical_realtime_tunable_ts = torsion_spring::TorsionSpring::new(
+            self.config(py).vertical_realtime_tunable_torsion_spirng_k,
+            0.,
+            Coordinate::new(0., 1., 0.),
+        );
+        let vertical_discrepancy_angles = (1..self.somites(py).len() - 1)
+            .map(|i| {
+                // i is somite id
+                let current_angle = vertical_realtime_tunable_ts.current_angle(
+                    self.somites(py)[i - 1].get_position(),
+                    self.somites(py)[i].get_position(),
+                    self.somites(py)[i + 1].get_position(),
+                );
+                match self.target_angles(py).borrow_mut().remove(&(i as u32)) {
+                    Some(target_angle) => (target_angle - current_angle).max(0.),
                     None => match self.oscillators(py).get(&(i as u32)) {
-                        Some(oscillator) => phase2torsion_spring_target_angle(
-                            oscillator.borrow().get_phase(),
-                            self.oscillation_ranges(py).get(&(i as u32)).unwrap().get(),
-                        ),
+                        Some(oscillator) => {
+                            let target_angle = phase2torsion_spring_target_angle(
+                                oscillator.borrow().get_phase(),
+                                self.oscillation_ranges(py).get(&(i as u32)).unwrap().get(),
+                            );
+                            target_angle - current_angle
+                        }
                         None => 0.,
                     },
-                },
-            )
+                }
+            })
             .collect::<Vec<f64>>();
-        let torsion_spring_tensions =
-            self.calculate_torsion_spring_tensions(py, &vertical_ts, &vertical_angles);
+        let torsion_spring_tensions = self.calculate_realtime_tunable_torsion_spring_tensions(
+            py,
+            &vertical_realtime_tunable_ts,
+            &vertical_discrepancy_angles,
+        );
         for (i, tension) in torsion_spring_tensions.into_iter().enumerate() {
             self.torsion_spring_tensions(py)[i].set(tension);
         }
-        new_forces = self.add_torsion_spring_forces(py, vertical_ts, vertical_angles, new_forces);
+        new_forces = self.add_realtime_tunable_torsion_spring_forces(
+            py,
+            vertical_realtime_tunable_ts,
+            vertical_discrepancy_angles,
+            new_forces,
+        );
 
         new_forces = self.add_frictional_forces(py, new_forces);
 
@@ -423,46 +444,74 @@ impl Caterpillar {
             );
         }
         for i in 1..(self.somites(py).len() - 1) {
-            let b_pos = self.somites(py)[i - 1].get_position();
-            let m_pos = self.somites(py)[i].get_position();
-            let f_pos = self.somites(py)[i + 1].get_position();
-            let target_arg = target_angles[i - 1];
-
             // torsion spring at i+1 th somite
-            forces[i - 1] += t_spring.force(f_pos, m_pos, b_pos, -target_arg);
-            forces[i] -= t_spring.force(f_pos, m_pos, b_pos, -target_arg)
-                + t_spring.force(b_pos, m_pos, f_pos, target_arg);
-            forces[i + 1] += t_spring.force(b_pos, m_pos, f_pos, target_arg);
+            let (force_on_t, force_on_b) = t_spring.force(
+                self.somites(py)[i - 1].get_position(),
+                self.somites(py)[i].get_position(),
+                self.somites(py)[i + 1].get_position(),
+                target_angles[i - 1],
+            );
+            forces[i - 1] += force_on_b;
+            forces[i] -= force_on_b + force_on_t; // reaction
+            forces[i + 1] += force_on_t;
         }
         forces
     }
 
-    fn calculate_torsion_spring_tensions(
+    fn add_realtime_tunable_torsion_spring_forces(
+        &self,
+        py: Python,
+        t_spring: torsion_spring::TorsionSpring,
+        discrepancy_angles: Vec<f64>,
+        mut forces: Vec<Coordinate>,
+    ) -> Vec<Coordinate> {
+        // discrepancy_angles[i-1] corresponds to a torsion spring on somite i
+        if discrepancy_angles.len() != self.somites(py).len() - 2 {
+            panic!(
+                "discrepancy_angles should be somites.len() - 2 = {}, got {}",
+                self.somites(py).len() - 2,
+                discrepancy_angles.len()
+            );
+        }
+        for i in 1..(self.somites(py).len() - 1) {
+            // torsion spring at i+1 th somite
+            let (force_on_t, force_on_b) = t_spring.force_on_discrepancy(
+                self.somites(py)[i - 1].get_position(),
+                self.somites(py)[i].get_position(),
+                self.somites(py)[i + 1].get_position(),
+                discrepancy_angles[i - 1],
+            );
+            forces[i - 1] += force_on_b;
+            forces[i] -= force_on_b + force_on_t; // reaction
+            forces[i + 1] += force_on_t;
+        }
+        forces
+    }
+
+    fn calculate_realtime_tunable_torsion_spring_tensions(
         &self,
         py: Python,
         t_spring: &torsion_spring::TorsionSpring,
-        target_angles: &Vec<f64>,
+        discrepancy_angles: &Vec<f64>,
     ) -> Vec<f64> {
         // tension i is force applied to torsion spring on i - 1 th somite
-        if target_angles.len() != self.somites(py).len() - 2 {
+        if discrepancy_angles.len() != self.somites(py).len() - 2 {
             panic!(
-                "target_angles should be somites.len() - 2 = {}, got {}",
+                "discrepancy_angle should be somites.len() - 2 = {}, got {}",
                 self.somites(py).len() - 2,
-                target_angles.len()
+                discrepancy_angles.len()
             );
         }
         let mut tensions = Vec::<f64>::with_capacity(self.somites(py).len() - 2);
         for i in 1..(self.somites(py).len() - 1) {
-            let b_pos = self.somites(py)[i - 1].get_position();
-            let m_pos = self.somites(py)[i].get_position();
-            let f_pos = self.somites(py)[i + 1].get_position();
-            let target_arg = target_angles[i - 1];
-
             // torsion spring at i+1 th somite
-            tensions.push(
-                t_spring.angle_sign_to_target(b_pos, m_pos, f_pos, target_arg)
-                    * t_spring.force(b_pos, m_pos, f_pos, target_arg).norm(),
+            let (force_on_t, _) = t_spring.force_on_discrepancy(
+                self.somites(py)[i - 1].get_position(),
+                self.somites(py)[i].get_position(),
+                self.somites(py)[i + 1].get_position(),
+                discrepancy_angles[i - 1],
             );
+            tensions.push(discrepancy_angles[i - 1].signum() * force_on_t.norm());
         }
         tensions
     }
