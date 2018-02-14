@@ -14,6 +14,10 @@ impl PhaseOscillator {
         self.current_phase
     }
 
+    pub fn set_phase(&mut self, phase: f64) {
+        self.current_phase = phase
+    }
+
     pub fn step(&mut self, phase_speed: f64, time_delta: f64) -> f64 {
         // proceed one step and return new updated phase
         self.current_phase += phase_speed * time_delta;

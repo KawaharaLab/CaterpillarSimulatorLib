@@ -219,12 +219,21 @@ py_class!(class Caterpillar |py| {
         self.update_state(py, dt);
         Ok(py.None())
     }
-    def step_with_target_angles(&self, dt: f64, target_angles: PyTuple) -> PyResult<PyObject> {
-        if target_angles.len(py) != self.somites(py).len() - 2 {
-            panic!("number of elements in target_angles and torsion springs are inconsistent");
+    def step_with_target_angles(&self, dt: f64, somite_target_angles: PyTuple, gripper_target_angles: PyTuple) -> PyResult<PyObject> {
+        if somite_target_angles.len(py) != self.somites(py).len() - 2 {
+            panic!("number of elements in somite_target_angles and torsion springs are inconsistent");
         }
-        for (i, target_angle) in target_angles.iter(py).enumerate() {
+        if gripper_target_angles.len(py) != self.gripping_oscillators(py).len() {
+            panic!("number of elements in gripper_target_angles and torsion springs are inconsistent");
+        }
+        for (i, target_angle) in somite_target_angles.iter(py).enumerate() {
             self.target_angles(py).borrow_mut().insert(i as u32 + 1, target_angle.extract::<f64>(py).unwrap());
+        }
+        let mut gripper_target_angles_iter = gripper_target_angles.iter(py);
+        for i in 0..self.somites(py).len() {
+            if let Some(oscillator) = self.gripping_oscillators(py).get(&(i as u32)) {
+                oscillator.borrow_mut().set_phase(gripper_target_angles_iter.next().unwrap().extract::<f64>(py).unwrap());
+            }
         }
 
         self.update_state(py, dt);
@@ -592,14 +601,16 @@ impl Caterpillar {
                 // calculate grip force
                 if s.is_gripping() {
                     let gripping_point = s.get_gripping_point().unwrap();
-                    forces[i] += Coordinate::new(
-                        -self.config(py).gripping_shear_stress_k
-                            * (s.get_position().x - gripping_point.x)
-                            - self.config(py).gripping_shear_stress_c * s.get_verocity().x,
-                        0.,
-                        -1. * forces[i].z.max(0.), // cancel force along positive z axis
-                    )
+                    let friction_x = -self.config(py).gripping_shear_stress_k
+                        * (s.get_position().x - gripping_point.x)
+                        - self.config(py).gripping_shear_stress_c * s.get_verocity().x;
+                    forces[i] += Coordinate::new(friction_x, 0., -1. * forces[i].z.max(0.)); // cancel force along positive z axis
+                    self.frictional_forces(py)[i].set(Coordinate::new(friction_x, 0., 0.));
+                } else {
+                    self.frictional_forces(py)[i].set(Coordinate::zero());
                 }
+            } else {
+                self.frictional_forces(py)[i].set(Coordinate::zero())
             }
         }
         forces

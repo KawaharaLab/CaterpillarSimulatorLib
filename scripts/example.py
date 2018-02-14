@@ -31,23 +31,31 @@ if __name__ == '__main__':
     c = caterpillar.Caterpillar(5, (1,2,3), (0,1,2,3,4), caterpillar_params)
 
     # inching
-    for _ in range(75):
-        c.step_with_feedbacks(0.01, (0, 0, 0), (-np.pi, -np.pi, -np.pi, -np.pi, -np.pi))
-    for _ in range(1000):
-        c.step_with_feedbacks(0.01, (0, 0, 0), (0, 0, 0, 0, 0))
+    # for _ in range(75):
+    #     c.step_with_feedbacks(0.01, (0, 0, 0), (-np.pi, -np.pi, -np.pi, -np.pi, -np.pi))
+    # for _ in range(1000):
+    #     c.step_with_feedbacks(0.01, (0, 0, 0), (0, 0, 0, 0, 0))
 
     # crawling
     for _ in range(10):
         for _ in range(100):
-            c.set_gripping_phase_thresholds((np.pi*3./2., np.pi*3./2., np.pi*3./2., np.pi*3./2., np.pi*3./2.))
-            c.step_with_target_angles(0.01, (np.pi*1/2, 0, 0))
+            c.step_with_target_angles(0.01, (0, 0, 0), (1, 1, -1, -1, -1))
         for _ in range(100):
-            c.step_with_target_angles(0.01, (0, np.pi*1/2, 0))
+            c.step_with_target_angles(0.01, (np.pi*1/2, 0, 0), (1, 1, -1, -1, -1))
         for _ in range(100):
-            c.set_gripping_phase_thresholds((0, 0, 0, 0, 0))
-            c.step_with_target_angles(0.01, (0, 0, np.pi*1/2))
+            c.step_with_target_angles(0.01, (np.pi*1/2, 0, 0), (-1, -1, -1, -1, -1))
         for _ in range(100):
-            c.step_with_target_angles(0.01, (0, 0, 0))
+            c.step_with_target_angles(0.01, (np.pi*1/2, 0, 0), (-1, -1, 1, 1, -1))
+        for _ in range(100):
+            c.step_with_target_angles(0.01, (0, np.pi*1/2, 0), (-1, -1, 1, 1, -1))
+        for _ in range(100):
+            c.step_with_target_angles(0.01, (0, np.pi*1/2, 0), (-1, -1, -1, -1, -1))
+        for _ in range(100):
+            c.step_with_target_angles(0.01, (0, np.pi*1/2, 0), (-1, -1, -1, -1, -1))
+        for _ in range(100):
+            c.step_with_target_angles(0.01, (0, 0, np.pi*1/2), (-1, -1, -1, -1, 1))
+        for _ in range(100):
+            c.step_with_target_angles(0.01, (0, 0, 0), (-1, -1, -1, -1, 1))
 
 
     c.save_simulation("test_render.json")
