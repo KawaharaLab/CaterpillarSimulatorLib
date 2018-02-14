@@ -157,6 +157,7 @@ mod test {
     fn test_panick_on_invalid_standard_vector() {
         TorsionSpring::new(
             0.,
+            0.,
             coordinate::Coordinate {
                 x: 1.,
                 y: 1.,
@@ -168,6 +169,7 @@ mod test {
     #[test]
     fn test_angle() {
         let torsion_spring1 = TorsionSpring::new(
+            0.,
             0.,
             coordinate::Coordinate {
                 x: 0.,
@@ -190,6 +192,7 @@ mod test {
         assert!(expected1 - EPSILON < angle1 && angle1 < expected1 + EPSILON);
 
         let torsion_spring2 = TorsionSpring::new(
+            0.,
             0.,
             coordinate::Coordinate {
                 x: 0.,
@@ -215,6 +218,7 @@ mod test {
     #[test]
     fn test_normal_vector() {
         let torsion_spring = TorsionSpring::new(
+            0.,
             0.,
             coordinate::Coordinate {
                 x: 0.,

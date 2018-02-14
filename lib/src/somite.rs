@@ -10,6 +10,8 @@ pub struct Somite {
     pub force: cell::Cell<coordinate::Coordinate>,
     pub radius: f64,
     pub mass: f64,
+    gripping_flag: cell::Cell<bool>,
+    gripping_point: cell::RefCell<coordinate::Coordinate>,
 }
 
 impl fmt::Display for Somite {
@@ -41,6 +43,10 @@ impl Somite {
             }),
             radius: radius,
             mass: mass,
+            gripping_flag: cell::Cell::new(false),
+            gripping_point: cell::RefCell::<coordinate::Coordinate>::new(
+                coordinate::Coordinate::zero(),
+            ),
         }
     }
 
@@ -104,4 +110,55 @@ impl Somite {
     pub fn is_moving_y(&self) -> bool {
         unsafe { *self.verocity.as_ptr() }.y.abs() > EPSILON
     }
+
+    pub fn is_gripping(&self) -> bool {
+        self.gripping_flag.get()
+    }
+
+    pub fn grip(&self) {
+        // update gripping point only if gripping flag is false
+        if !self.gripping_flag.get() {
+            self.gripping_flag.set(true);
+            let p = self.position.get();
+            self.gripping_point.borrow_mut().x = p.x;
+            self.gripping_point.borrow_mut().y = p.y;
+            self.gripping_point.borrow_mut().z = p.z;
+        }
+    }
+
+    pub fn release(&self) {
+        self.gripping_flag.set(false);
+    }
+
+    pub fn get_gripping_point(&self) -> Option<cell::Ref<coordinate::Coordinate>> {
+        if self.gripping_flag.get() {
+            Some(self.gripping_point.borrow())
+        } else {
+            None
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_grip() {
+        let s = Somite::new_still_somite(1., 2., coordinate::Coordinate::new(0., 0., 4.));
+        s.grip();
+        assert_eq!(
+            *s.get_gripping_point().unwrap(),
+            coordinate::Coordinate::new(0., 0., 4.)
+        );
+
+        // don't update gripping point if already gripping
+        s.set_position(coordinate::Coordinate::new(1., 0., 4.));
+        s.grip();
+        assert_eq!(
+            *s.get_gripping_point().unwrap(),
+            coordinate::Coordinate::new(0., 0., 4.)
+        );
+    }
+
 }

@@ -39,11 +39,19 @@ py_class!(class Caterpillar |py| {
     data frame_count: cell::Cell<u32>;
     data temp_forces: Vec<cell::Cell<Coordinate>>;
     data oscillators: collections::HashMap<u32, cell::RefCell<phase_oscillator::PhaseOscillator>>;
+    data gripping_oscillators: collections::HashMap<u32, cell::RefCell<phase_oscillator::PhaseOscillator>>;
     data oscillation_ranges: collections::HashMap<u32, cell::Cell<f64>>;
     data frictional_forces: Vec<cell::Cell<Coordinate>>;
     data target_angles: cell::RefCell<collections::HashMap<u32, f64>>;
     data torsion_spring_tensions: Vec<cell::Cell<f64>>;
-    def __new__(_cls, somite_number: usize, somites_to_set_oscillater: &PyTuple, kwargs: Option<&PyDict>) -> PyResult<Caterpillar> {
+    data gripping_thresholds: collections::HashMap<u32, cell::Cell<f64>>;
+    def __new__(
+        _cls,
+        somite_number: usize,
+        somites_to_set_oscillater: &PyTuple,
+        somites_to_set_gripper: &PyTuple,
+        kwargs: Option<&PyDict>
+    ) -> PyResult<Caterpillar> {
         // parse config
         let config = match kwargs {
             Some(kwargs) => Self::parse_config(py, kwargs),
@@ -75,9 +83,21 @@ py_class!(class Caterpillar |py| {
                 cell::RefCell::<phase_oscillator::PhaseOscillator>::new(phase_oscillator::PhaseOscillator::new())
             );
         }
+
+        let mut gripping_oscillators = collections::HashMap::<u32, cell::RefCell<phase_oscillator::PhaseOscillator>>::new();
+        let mut gripping_thresholds = collections::HashMap::<u32, cell::Cell<f64>>::new();
+        for somite_id in somites_to_set_gripper.iter(py) {
+            let id = somite_id.extract::<u32>(py).unwrap();
+            gripping_oscillators.insert(id, cell::RefCell::<phase_oscillator::PhaseOscillator>::new(phase_oscillator::PhaseOscillator::new()));
+            gripping_thresholds.insert(id, cell::Cell::<f64>::new(config.gripping_phase_threshold));
+        }
+
         let mut oscillation_ranges = collections::HashMap::<u32, cell::Cell<f64>>::new();
         for somite_id in somites_to_set_oscillater.iter(py) {
-            oscillation_ranges.insert(somite_id.extract::<u32>(py).unwrap(), cell::Cell::<f64>::new(config.realtime_tunable_ts_rom));
+            oscillation_ranges.insert(
+                somite_id.extract::<u32>(py).unwrap(),
+                cell::Cell::<f64>::new(config.realtime_tunable_ts_rom)
+            );
         }
 
         let initial_frictions = (0..somite_number).map(|_| {
@@ -90,6 +110,7 @@ py_class!(class Caterpillar |py| {
             cell::Cell::<f64>::new(0.)
         }).collect::<Vec<cell::Cell<f64>>>();
 
+
         Caterpillar::create_instance(
             py,
             config,
@@ -98,10 +119,12 @@ py_class!(class Caterpillar |py| {
             cell::Cell::<u32>::new(0),
             temp_forces,
             oscillators,
+            gripping_oscillators,
             oscillation_ranges,
             initial_frictions,
             target_angles,
             tensions,
+            gripping_thresholds,
         )
     }
     def print_config(&self) -> PyResult<PyString> {
@@ -155,20 +178,43 @@ py_class!(class Caterpillar |py| {
         }
         Ok(py.None())
     }
+    def set_gripping_phase_thresholds(&self, phase_thresholds: PyTuple) -> PyResult<PyObject> {
+        if phase_thresholds.len(py) != self.gripping_oscillators(py).len() {
+            panic!("number of elements in phase_threshold({}) and gripping oscillator controllers({}) are inconsistent",
+                phase_thresholds.len(py), self.gripping_oscillators(py).len());
+        }
+        let mut threshold_iter = phase_thresholds.iter(py);
+        for (_, threshold) in self.gripping_thresholds(py) {
+            threshold.set(threshold_iter.next().unwrap().extract::<f64>(py).unwrap());
+        }
+        Ok(py.None())
+    }
     def step(&self, dt: f64) -> PyResult<PyObject> {
+        // update somites' oscillators
         for (_, oscillator) in self.oscillators(py) {
+            oscillator.borrow_mut().step(self.config(py).normal_angular_velocity, dt);
+        }
+        // update grippers' oscillators
+        for (_, oscillator) in self.gripping_oscillators(py) {
             oscillator.borrow_mut().step(self.config(py).normal_angular_velocity, dt);
         }
         self.update_state(py, dt);
         Ok(py.None())
     }
-    def step_with_feedbacks(&self, dt: f64, feedbacks: PyTuple) -> PyResult<PyObject> {
-        if feedbacks.len(py) != self.oscillators(py).len() {
-            panic!("number of elements in feedbacks and oscillator controllers are inconsistent");
+    def step_with_feedbacks(&self, dt: f64, feedbacks_somites: PyTuple, feedbacks_grippers: PyTuple) -> PyResult<PyObject> {
+        if feedbacks_somites.len(py) != self.oscillators(py).len() {
+            panic!("number of elements in feedbacks_somites and oscillator controllers for somites are inconsistent");
         }
-        let mut iter = feedbacks.iter(py);
+        if feedbacks_grippers.len(py) != self.gripping_oscillators(py).len() {
+            panic!("number of elements in feedbacks_grippers and oscillator controllers for grippers are inconsistent");
+        }
+        let mut somite_feedback_iter = feedbacks_somites.iter(py);
         for (_, oscillator) in self.oscillators(py) {
-            oscillator.borrow_mut().step(self.config(py).normal_angular_velocity + iter.next().unwrap().extract::<f64>(py).unwrap(), dt);
+            oscillator.borrow_mut().step(self.config(py).normal_angular_velocity + somite_feedback_iter.next().unwrap().extract::<f64>(py).unwrap(), dt);
+        }
+        let mut gripper_feedback_iter = feedbacks_grippers.iter(py);
+        for (_, oscillator) in self.gripping_oscillators(py) {
+            oscillator.borrow_mut().step(self.config(py).normal_angular_velocity + gripper_feedback_iter.next().unwrap().extract::<f64>(py).unwrap(), dt);
         }
         self.update_state(py, dt);
         Ok(py.None())
@@ -204,11 +250,21 @@ py_class!(class Caterpillar |py| {
             )
         )
     }
-    def phases(&self) -> PyResult<PyTuple> {
+    def somite_phases(&self) -> PyResult<PyTuple> {
         Ok(
             PyTuple::new(
                 py,
                 self.oscillators(py).values().map(|o| {
+                    o.borrow().get_phase().into_py_object(py).into_object()
+                }).collect::<Vec<PyObject>>().as_slice()
+            )
+        )
+    }
+    def gripper_phases(&self) -> PyResult<PyTuple> {
+        Ok(
+            PyTuple::new(
+                py,
+                self.gripping_oscillators(py).values().map(|o| {
                     o.borrow().get_phase().into_py_object(py).into_object()
                 }).collect::<Vec<PyObject>>().as_slice()
             )
@@ -364,7 +420,8 @@ impl Caterpillar {
             new_forces,
         );
 
-        new_forces = self.add_frictional_forces(py, new_forces);
+        // new_forces = self.add_frictional_forces(py, new_forces);
+        new_forces = self.add_gripping_forces(py, new_forces);
 
         self.mask_force_on_landing(py, new_forces)
     }
@@ -516,126 +573,39 @@ impl Caterpillar {
         tensions
     }
 
-    fn add_frictional_forces(&self, py: Python, mut forces: Vec<Coordinate>) -> Vec<Coordinate> {
+    fn add_gripping_forces(&self, py: Python, mut forces: Vec<Coordinate>) -> Vec<Coordinate> {
         for (i, s) in self.somites(py).iter().enumerate() {
-            if s.is_on_ground() {
-                let friction = friction(
-                    self.static_friction_coeff(py, i),
-                    self.dynamic_friction_coeff(py, i),
-                    self.viscosity_friction_coeff(py, i),
-                    s,
-                    &forces[i],
-                );
-                self.frictional_forces(py)[i].set(friction);
-                forces[i] += friction;
+            if let Some(oscillator) = self.gripping_oscillators(py).get(&(i as u32)) {
+                // update grip state
+                if oscillator.borrow().get_phase().sin()
+                    < self.gripping_thresholds(py).get(&(i as u32)).unwrap().get()
+                {
+                    if s.is_on_ground() && !s.is_gripping() {
+                        s.grip();
+                    }
+                } else {
+                    if s.is_gripping() {
+                        s.release();
+                    }
+                }
+
+                // calculate grip force
+                if s.is_gripping() {
+                    let gripping_point = s.get_gripping_point().unwrap();
+                    forces[i] += Coordinate::new(
+                        -self.config(py).gripping_shear_stress_k
+                            * (s.get_position().x - gripping_point.x)
+                            - self.config(py).gripping_shear_stress_c * s.get_verocity().x,
+                        0.,
+                        -1. * forces[i].z.max(0.), // cancel force along positive z axis
+                    )
+                }
             }
         }
         forces
-    }
-
-    fn static_friction_coeff(&self, py: Python, i: usize) -> f64 {
-        if i == 0 || i == self.somites(py).len() - 1 {
-            let somite_position = self.somites(py)[i].get_position();
-            let adj_somite_position = if i == 0 {
-                self.somites(py)[1].get_position()
-            } else {
-                self.somites(py)[i - 1].get_position()
-            };
-
-            let position_diff = adj_somite_position - somite_position; // tip should be lower
-            let tan = position_diff.y / position_diff.x;
-            if tan > self.config(py).friction_switch_tan {
-                self.config(py).tip_sub_static_friction_coeff
-            } else {
-                self.config(py).static_friction_coeff
-            }
-        } else {
-            self.config(py).static_friction_coeff
-        }
-    }
-
-    fn dynamic_friction_coeff(&self, py: Python, i: usize) -> f64 {
-        if i == 0 || i == self.somites(py).len() - 1 {
-            let somite_position = self.somites(py)[i].get_position();
-            let adj_somite_position = if i == 0 {
-                self.somites(py)[1].get_position()
-            } else {
-                self.somites(py)[i - 1].get_position()
-            };
-
-            let position_diff = adj_somite_position - somite_position; // tip should be lower
-            let tan = position_diff.y / position_diff.x;
-            if tan > self.config(py).friction_switch_tan {
-                self.config(py).tip_sub_dynamic_friction_coeff
-            } else {
-                self.config(py).dynamic_friction_coeff
-            }
-        } else {
-            self.config(py).dynamic_friction_coeff
-        }
-    }
-
-    fn viscosity_friction_coeff(&self, py: Python, i: usize) -> f64 {
-        if i == 0 || i == self.somites(py).len() - 1 {
-            let somite_position = self.somites(py)[i].get_position();
-            let adj_somite_position = if i == 0 {
-                self.somites(py)[1].get_position()
-            } else {
-                self.somites(py)[i - 1].get_position()
-            };
-
-            let position_diff = adj_somite_position - somite_position; // tip should be lower
-            let tan = position_diff.y / position_diff.x;
-            if tan > self.config(py).friction_switch_tan {
-                self.config(py).tip_sub_viscosity_friction_coeff
-            } else {
-                self.config(py).viscosity_friction_coeff
-            }
-        } else {
-            self.config(py).viscosity_friction_coeff
-        }
     }
 }
 
 fn phase2torsion_spring_target_angle(phase: f64, range: f64) -> f64 {
     range * (1. - phase.cos()) * 0.5
-}
-
-fn friction(
-    static_friction_coeff: f64,
-    dynamic_friction_coeff: f64,
-    viscosity_friction_coeff: f64,
-    somite: &somite::Somite,
-    force: &Coordinate,
-) -> Coordinate {
-    // frictional force should depend on negative force along z-axis
-    // static friction or viscosity + dynamic friction
-    let verocity = somite.get_verocity();
-    let friction_x = if somite.is_moving_x() {
-        // dynamic frictional force + viscosity
-        dynamic_friction_coeff * force.z.min(0.) * &somite.get_verocity_direction_x()
-            + -viscosity_friction_coeff * verocity.x
-    } else {
-        // static frictional force
-        if force.x.abs() > static_friction_coeff * force.z.min(0.).abs() {
-            force.x.signum() * static_friction_coeff * force.z.min(0.)
-        } else {
-            -force.x
-        }
-    };
-
-    let friction_y = if somite.is_moving_y() {
-        // dynamic frictional force
-        dynamic_friction_coeff * force.z.min(0.) * &somite.get_verocity_direction_y()
-            + -viscosity_friction_coeff * verocity.y
-    } else {
-        // static frictional force
-        if force.y.abs() > static_friction_coeff * force.z.min(0.).abs() {
-            force.y.signum() * static_friction_coeff * force.z.min(0.)
-        } else {
-            -force.y
-        }
-    };
-
-    Coordinate::new(friction_x, friction_y, 0.)
 }

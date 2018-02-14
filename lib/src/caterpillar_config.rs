@@ -27,6 +27,9 @@ pub struct Config {
     pub tip_sub_dynamic_friction_coeff: f64,
     pub tip_sub_viscosity_friction_coeff: f64,
     pub friction_switch_tan: f64,
+    pub gripping_phase_threshold: f64,
+    pub gripping_shear_stress_k: f64,
+    pub gripping_shear_stress_c: f64,
 }
 
 impl Config {
@@ -61,6 +64,9 @@ impl Config {
             "tip_sub_dynamic_friction_coeff" => self.tip_sub_dynamic_friction_coeff = val,
             "tip_sub_viscosity_friction_coeff" => self.tip_sub_viscosity_friction_coeff = val,
             "friction_switch_tan" => self.friction_switch_tan = val,
+            "gripping_phase_threshold" => self.gripping_phase_threshold = val,
+            "gripping_shear_stress_k" => self.gripping_shear_stress_k = val,
+            "gripping_shear_stress_c" => self.gripping_shear_stress_c = val,
             _ => panic!("invalid config: {}", key),
         };
     }
@@ -69,30 +75,33 @@ impl Config {
 impl default::Default for Config {
     fn default() -> Self {
         Config {
-            time_delta: 0.01,                                // s
-            somite_mass: 1.,                                 // kg
-            somite_radius: 0.1,                              // m
-            normal_angular_velocity: f64::consts::PI,        // rad/s
-            rts_max_natural_length: 0.1,                     // m
-            rts_k: 100.,                                     // N/m
-            rts_c: 10.,                                      // Ns/m
-            rts_amp: 0.05,                                   // m
-            sp_natural_length: 0.1,                          // m
-            sp_k: 100.,                                      // N/m
-            dp_c: 10.,                                       // Ns/m
-            horizon_ts_k0: 0.,                               // N/rad
-            horizon_ts_k1: 0.,                               // N/rad
-            vertical_ts_k0: 0.,                              // N/rad
-            vertical_ts_k1: 0.,                              // N/rad
-            vertical_realtime_tunable_torsion_spirng_k: 10., // N/rad
-            realtime_tunable_ts_rom: 0.5 * f64::consts::PI,  // rad
-            static_friction_coeff: 10.,                      //
-            dynamic_friction_coeff: 7.,                      //
-            viscosity_friction_coeff: 5.,                    // Ns/m
-            tip_sub_static_friction_coeff: 1.,               //
-            tip_sub_dynamic_friction_coeff: 0.7,             //
-            tip_sub_viscosity_friction_coeff: 0.5,           // Ns/m
-            friction_switch_tan: 0.7,                        //
+            time_delta: 0.01,                                      // s
+            somite_mass: 1.,                                       // kg
+            somite_radius: 0.1,                                    // m
+            normal_angular_velocity: f64::consts::PI,              // rad/s
+            rts_max_natural_length: 0.1,                           // m
+            rts_k: 100.,                                           // N/m
+            rts_c: 10.,                                            // Ns/m
+            rts_amp: 0.05,                                         // m
+            sp_natural_length: 0.1,                                // m
+            sp_k: 100.,                                            // N/m
+            dp_c: 10.,                                             // Ns/m
+            horizon_ts_k0: 0.,                                     // N/rad
+            horizon_ts_k1: 0.,                                     // N/rad
+            vertical_ts_k0: 0.,                                    // N/rad
+            vertical_ts_k1: 0.,                                    // N/rad
+            vertical_realtime_tunable_torsion_spirng_k: 10.,       // N/rad
+            realtime_tunable_ts_rom: 0.5 * f64::consts::PI,        // rad
+            static_friction_coeff: 10.,                            //
+            dynamic_friction_coeff: 7.,                            //
+            viscosity_friction_coeff: 5.,                          // Ns/m
+            tip_sub_static_friction_coeff: 1.,                     //
+            tip_sub_dynamic_friction_coeff: 0.7,                   //
+            tip_sub_viscosity_friction_coeff: 0.5,                 // Ns/m
+            friction_switch_tan: 0.7,                              //
+            gripping_phase_threshold: f64::consts::PI * 5.0 / 4.0, //
+            gripping_shear_stress_k: 500.,
+            gripping_shear_stress_c: 10.,
         }
     }
 }
@@ -130,6 +139,9 @@ impl fmt::Display for Config {
              vertical_realtime_tunable_torsion_spirng_k: {} N/rad\n\
              [realtime tunable torsion spring]
              range of motion: {} rad\n\
+             [gripping]
+             gripping shear stress k: {} N/m\n\
+             gripping shear stress c: {} Ns/m\n\
              [simulation]\n\
              one time step: {} s",
             self.somite_mass,
@@ -155,6 +167,8 @@ impl fmt::Display for Config {
             self.vertical_ts_k1,
             self.vertical_realtime_tunable_torsion_spirng_k,
             self.realtime_tunable_ts_rom,
+            self.gripping_shear_stress_k,
+            self.gripping_shear_stress_c,
             self.time_delta,
         )
     }
