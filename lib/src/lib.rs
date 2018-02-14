@@ -607,10 +607,33 @@ impl Caterpillar {
                     forces[i] += Coordinate::new(friction_x, 0., -1. * forces[i].z.max(0.)); // cancel force along positive z axis
                     self.frictional_forces(py)[i].set(Coordinate::new(friction_x, 0., 0.));
                 } else {
-                    self.frictional_forces(py)[i].set(Coordinate::zero());
+                    if s.is_on_ground() {
+                        let dynamic_friction_x = s.get_verocity().x.signum()
+                            * self.config(py).dynamic_friction_coeff
+                            * forces[i].z.min(0.)
+                            - self.config(py).viscosity_friction_coeff * s.get_verocity().x;
+                        forces[i] += Coordinate::new(dynamic_friction_x, 0., 0.);
+                        self.frictional_forces(py)[i].set(Coordinate::new(
+                            dynamic_friction_x,
+                            0.,
+                            0.,
+                        ));
+                    } else {
+                        self.frictional_forces(py)[i].set(Coordinate::zero());
+                    }
                 }
             } else {
-                self.frictional_forces(py)[i].set(Coordinate::zero())
+                // no gripper on the i th somite
+                if s.is_on_ground() {
+                    let dynamic_friction_x = s.get_verocity().x.signum()
+                        * self.config(py).dynamic_friction_coeff
+                        * forces[i].z.min(0.)
+                        - self.config(py).viscosity_friction_coeff * s.get_verocity().x;
+                    forces[i] += Coordinate::new(dynamic_friction_x, 0., 0.);
+                    self.frictional_forces(py)[i].set(Coordinate::new(dynamic_friction_x, 0., 0.));
+                } else {
+                    self.frictional_forces(py)[i].set(Coordinate::zero());
+                }
             }
         }
         forces
