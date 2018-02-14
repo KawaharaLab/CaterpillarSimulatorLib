@@ -1,0 +1,34 @@
+pub fn differentiate(previous_val: f64, current_val: f64, dt: f64) -> Option<f64> {
+    if dt == 0. {
+        None
+    } else {
+        Some((current_val - previous_val) / dt)
+    }
+}
+
+pub fn hysteresis_function(v: f64, dv: f64) -> f64 {
+    // hysteresis loop between (0, c_{min}) and (\theta_{max}, 1)
+    // interpolation with parabola
+    let c_min = 0.2_f64;
+    let v_max = 1.5_f64;
+    let alpha = (1.0 - c_min) / v_max.powi(2);
+    if dv >= 0. {
+        -alpha * (v - v_max).powi(2) + 1.
+    } else {
+        alpha * v.powi(2) + c_min
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn test_hysteresis_function() {
+        let alpha = 0.8 / 1.5_f64.powi(2);
+        let forward_process_val = -alpha * (1.0_f64 - 1.5_f64).powi(2) + 1.;
+        assert_eq!(hysteresis_function(1., 0.5), forward_process_val);
+        let backward_process_val = alpha + 0.2;
+        assert_eq!(hysteresis_function(1., -0.3), backward_process_val);
+    }
+}

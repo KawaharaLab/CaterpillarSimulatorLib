@@ -18,6 +18,7 @@ pub struct Config {
     pub horizon_ts_k1: f64,
     pub vertical_ts_k0: f64,
     pub vertical_ts_k1: f64,
+    pub vertical_ts_c: f64,
     pub vertical_realtime_tunable_torsion_spirng_k: f64,
     pub realtime_tunable_ts_rom: f64,
     pub static_friction_coeff: f64,
@@ -53,6 +54,7 @@ impl Config {
             "horizon_ts_k1" => self.horizon_ts_k1 = val,
             "vertical_ts_k0" => self.vertical_ts_k0 = val,
             "vertical_ts_k1" => self.vertical_ts_k1 = val,
+            "vertical_ts_c" => self.vertical_ts_c = val,
             "vertical_realtime_tunable_torsion_spirng_k" => {
                 self.vertical_realtime_tunable_torsion_spirng_k = val
             }
@@ -90,6 +92,7 @@ impl default::Default for Config {
             horizon_ts_k1: 0.,                                     // N/rad
             vertical_ts_k0: 0.,                                    // N/rad
             vertical_ts_k1: 0.,                                    // N/rad
+            vertical_ts_c: 0.,                                     // Ns/rad
             vertical_realtime_tunable_torsion_spirng_k: 10.,       // N/rad
             realtime_tunable_ts_rom: 0.5 * f64::consts::PI,        // rad
             static_friction_coeff: 10.,                            //
@@ -136,6 +139,7 @@ impl fmt::Display for Config {
              horizon k1: {} N/rad\n\
              vertical k0: {} N/rad\n\
              vertical k1: {} N/rad\n\
+             vertical c: {} Ns/rad\n\
              vertical_realtime_tunable_torsion_spirng_k: {} N/rad\n\
              [realtime tunable torsion spring]
              range of motion: {} rad\n\
@@ -165,6 +169,7 @@ impl fmt::Display for Config {
             self.horizon_ts_k1,
             self.vertical_ts_k0,
             self.vertical_ts_k1,
+            self.vertical_ts_c,
             self.vertical_realtime_tunable_torsion_spirng_k,
             self.realtime_tunable_ts_rom,
             self.gripping_shear_stress_k,

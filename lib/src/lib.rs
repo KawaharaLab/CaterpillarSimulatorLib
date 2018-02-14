@@ -17,6 +17,7 @@ mod dumper;
 mod caterpillar_config;
 mod coordinate;
 mod simulation_export;
+mod calculations;
 
 use coordinate::Coordinate;
 
@@ -45,6 +46,7 @@ py_class!(class Caterpillar |py| {
     data target_angles: cell::RefCell<collections::HashMap<u32, f64>>;
     data torsion_spring_tensions: Vec<cell::Cell<f64>>;
     data gripping_thresholds: collections::HashMap<u32, cell::Cell<f64>>;
+    data previous_vertical_torsion_spring_angles: collections::HashMap<u32, cell::Cell<f64>>;
     def __new__(
         _cls,
         somite_number: usize,
@@ -78,8 +80,9 @@ py_class!(class Caterpillar |py| {
 
         let mut oscillators = collections::HashMap::<u32, cell::RefCell<phase_oscillator::PhaseOscillator>>::new();
         for somite_id in somites_to_set_oscillater.iter(py) {
+            let id = somite_id.extract::<u32>(py).unwrap();
             oscillators.insert(
-                somite_id.extract::<u32>(py).unwrap(),
+                id,
                 cell::RefCell::<phase_oscillator::PhaseOscillator>::new(phase_oscillator::PhaseOscillator::new())
             );
         }
@@ -110,6 +113,11 @@ py_class!(class Caterpillar |py| {
             cell::Cell::<f64>::new(0.)
         }).collect::<Vec<cell::Cell<f64>>>();
 
+        let mut previous_vertical_torsion_spring_angles = collections::HashMap::<u32, cell::Cell<f64>>::new();
+        for i in 1..somite_number-1 {
+            previous_vertical_torsion_spring_angles.insert(i as u32, cell::Cell::<f64>::new(0.));
+        }
+
 
         Caterpillar::create_instance(
             py,
@@ -125,6 +133,7 @@ py_class!(class Caterpillar |py| {
             target_angles,
             tensions,
             gripping_thresholds,
+            previous_vertical_torsion_spring_angles,
         )
     }
     def print_config(&self) -> PyResult<PyString> {
@@ -303,7 +312,7 @@ impl Caterpillar {
 
     fn update_state(&self, py: Python, time_delta: f64) {
         self.update_somite_positions(py, time_delta);
-        let new_forces = self.calculate_force_on_somites(py);
+        let new_forces = self.calculate_force_on_somites(py, time_delta);
         self.update_somite_verocities(py, time_delta, &new_forces);
         self.update_somite_forces(py, &new_forces);
 
@@ -358,7 +367,7 @@ impl Caterpillar {
         }
     }
 
-    fn calculate_force_on_somites(&self, py: Python) -> Vec<Coordinate> {
+    fn calculate_force_on_somites(&self, py: Python, time_delta: f64) -> Vec<Coordinate> {
         // calculate force from friction, tension, dumping, etc.
         // collect temporary force applied on somites and reset temp_forces instance variable
         let mut new_forces = self.temp_forces(py)
@@ -383,7 +392,8 @@ impl Caterpillar {
         let zero_angles = (1..self.somites(py).len() - 1)
             .map(|_| 0.)
             .collect::<Vec<f64>>();
-        new_forces = self.add_torsion_spring_forces(py, vertical_ts, zero_angles, new_forces);
+        new_forces =
+            self.add_torsion_spring_forces(py, vertical_ts, zero_angles, time_delta, new_forces);
 
         // vertical torsion force comming from actuator
         let vertical_realtime_tunable_ts = torsion_spring::TorsionSpring::new(
@@ -499,6 +509,7 @@ impl Caterpillar {
         py: Python,
         t_spring: torsion_spring::TorsionSpring,
         target_angles: Vec<f64>,
+        time_delta: f64,
         mut forces: Vec<Coordinate>,
     ) -> Vec<Coordinate> {
         // target_angles[i-1] corresponds to a torsion spring on somite i
@@ -510,16 +521,41 @@ impl Caterpillar {
             );
         }
         for i in 1..(self.somites(py).len() - 1) {
+            // calculate dumping torque
+            let angle = t_spring.current_angle(
+                self.somites(py)[i - 1].get_position(),
+                self.somites(py)[i].get_position(),
+                self.somites(py)[i + 1].get_position(),
+            );
+            let angular_velocity = calculations::differentiate(
+                self.previous_vertical_torsion_spring_angles(py)
+                    .get(&(i as u32))
+                    .unwrap()
+                    .get(),
+                angle,
+                time_delta,
+            ).unwrap();
+            let dumping_coeff = self.config(py).vertical_ts_c
+                * calculations::hysteresis_function(angle, angular_velocity);
+            let dumping_torque = -dumping_coeff * angular_velocity; // anti-clock-wise is positive rotation
+
             // torsion spring at i+1 th somite
             let (force_on_t, force_on_b) = t_spring.force(
                 self.somites(py)[i - 1].get_position(),
                 self.somites(py)[i].get_position(),
                 self.somites(py)[i + 1].get_position(),
                 target_angles[i - 1],
+                dumping_torque,
             );
             forces[i - 1] += force_on_b;
             forces[i] -= force_on_b + force_on_t; // reaction
             forces[i + 1] += force_on_t;
+
+            // memorize current angle
+            self.previous_vertical_torsion_spring_angles(py)
+                .get(&(i as u32))
+                .unwrap()
+                .set(angle);
         }
         forces
     }

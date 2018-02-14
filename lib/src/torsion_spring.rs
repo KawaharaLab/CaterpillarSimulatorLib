@@ -34,11 +34,13 @@ impl TorsionSpring {
         center: coordinate::Coordinate,
         tip: coordinate::Coordinate,
         target_angle: f64,
+        dumping_torque: f64,
     ) -> (coordinate::Coordinate, coordinate::Coordinate) {
         // calculate torsion force applied on tip and base, so that Arg(base-center, center-tip) anti-clock-wise to standard_vector becomes target_angular.
         // force applied on tip and base is or symmetrical.
         // base and tip are not symmetric, i.e. if you swap base and tip you should modify target_angular to (2*PI - original_target_angle).
         // range of target_angle is [0, 2*PI], if it exceeds target_angle % 2*PI will be used.
+        // dumping_torque is c \dot{\theta_{relative}}. anti-clock-wise is positive.
         let vec_bc = center - base;
         let vec_ct = tip - center;
         let angle_diff = self.angle(vec_bc, vec_ct) - target_angle;
@@ -50,10 +52,10 @@ impl TorsionSpring {
             )
         } else {
             (
-                self.normal_vector(vec_ct) * -self.calculate_spring_constant(angle_diff)
-                    * angle_diff,
-                self.normal_vector(vec_bc) * -self.calculate_spring_constant(angle_diff)
-                    * angle_diff,
+                self.normal_vector(vec_ct)
+                    * (-self.calculate_spring_constant(angle_diff) * angle_diff + dumping_torque),
+                self.normal_vector(vec_bc)
+                    * (-self.calculate_spring_constant(angle_diff) * angle_diff - dumping_torque),
             )
         }
     }

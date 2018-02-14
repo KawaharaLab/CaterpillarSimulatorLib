@@ -13,11 +13,12 @@ if __name__ == '__main__':
         "horizon_ts_k1": 0.,
         "vertical_ts_k0": 20.,
         "vertical_ts_k1": 0.,
+        "vertical_ts_c": 1.,
         "vertical_realtime_tunable_torsion_spirng_k": 30.,
         "realtime_tunable_ts_rom": np.pi * 1. / 3.,
         "static_friction_coeff": 1.0,
         "dynamic_friction_coeff": 0.1,
-        "viscosity_friction_coeff": 10.0,
+        "viscosity_friction_coeff": 3.0,
         "tip_sub_static_friction_coeff": 0.1,
         "tip_sub_dynamic_friction_coeff": 0.01,
         "tip_sub_viscosity_friction_coeff": 1.0,
@@ -31,10 +32,10 @@ if __name__ == '__main__':
     c = caterpillar.Caterpillar(5, (1,2,3), (0,1,2,3,4), caterpillar_params)
 
     # inching
-    # for _ in range(75):
-    #     c.step_with_feedbacks(0.01, (0, 0, 0), (-np.pi, -np.pi, -np.pi, -np.pi, -np.pi))
-    # for _ in range(1000):
-    #     c.step_with_feedbacks(0.01, (0, 0, 0), (0, 0, 0, 0, 0))
+    for _ in range(75):
+        c.step_with_feedbacks(0.01, (0, 0, 0), (-np.pi, -np.pi, -np.pi, -np.pi, -np.pi))
+    for _ in range(1000):
+        c.step_with_feedbacks(0.01, (0, 0, 0), (0, 0, 0, 0, 0))
 
     # crawling
     for _ in range(10):
