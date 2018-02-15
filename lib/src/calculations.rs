@@ -24,10 +24,7 @@ mod test {
 
     #[test]
     fn test_hysteresis_function() {
-        let alpha = 0.8 / 1.5_f64.powi(2);
-        let forward_process_val = -alpha * (1.0_f64 - 1.5_f64).powi(2) + 1.;
         assert_eq!(hysteresis_function(1., 0.5), 0.2_f64);
-        let backward_process_val = alpha + 0.2;
         assert_eq!(hysteresis_function(1., -0.3), 1.0_f64);
     }
 }

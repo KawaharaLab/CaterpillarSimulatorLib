@@ -284,8 +284,8 @@ py_class!(class Caterpillar |py| {
         Ok(
             PyTuple::new(
                 py,
-                self.oscillators(py).values().map(|o| {
-                    o.borrow().get_phase().into_py_object(py).into_object()
+                self.oscillator_ids(py).iter().map(|id| {
+                    self.oscillators(py).get(&id).unwrap().borrow().get_phase().into_py_object(py).into_object()
                 }).collect::<Vec<PyObject>>().as_slice()
             )
         )
@@ -294,8 +294,8 @@ py_class!(class Caterpillar |py| {
         Ok(
             PyTuple::new(
                 py,
-                self.gripping_oscillators(py).values().map(|o| {
-                    o.borrow().get_phase().into_py_object(py).into_object()
+                self.gripping_oscillator_ids(py).iter().map(|id| {
+                    self.gripping_oscillators(py).get(&id).unwrap().borrow().get_phase().into_py_object(py).into_object()
                 }).collect::<Vec<PyObject>>().as_slice()
             )
         )
