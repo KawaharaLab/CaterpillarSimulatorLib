@@ -17,8 +17,7 @@ impl TorsionSpring {
         spring_constant_k1: f64,
         standard: coordinate::Coordinate,
     ) -> Self {
-        let epsilon = 1.0e-10;
-        if standard.norm() <= 1. - epsilon || standard.norm() >= 1. + epsilon {
+        if standard.norm() <= 1. - EPSILON || standard.norm() >= 1. + EPSILON {
             panic!("norm of standard_vector should be 1.0, {}", standard)
         }
         TorsionSpring {

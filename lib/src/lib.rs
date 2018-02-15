@@ -37,16 +37,18 @@ py_class!(class Caterpillar |py| {
     data config: caterpillar_config::Config;
     data somites: Vec<somite::Somite>;
     data simulation_protocol: simulation_export::SimulationProc;
-    data frame_count: cell::Cell<u32>;
+    data frame_count: cell::Cell<usize>;
     data temp_forces: Vec<cell::Cell<Coordinate>>;
-    data oscillators: collections::HashMap<u32, cell::RefCell<phase_oscillator::PhaseOscillator>>;
-    data gripping_oscillators: collections::HashMap<u32, cell::RefCell<phase_oscillator::PhaseOscillator>>;
-    data oscillation_ranges: collections::HashMap<u32, cell::Cell<f64>>;
+    data oscillators: collections::HashMap<usize, cell::RefCell<phase_oscillator::PhaseOscillator>>;
+    data oscillator_ids: Vec<usize>;
+    data gripping_oscillators: collections::HashMap<usize, cell::RefCell<phase_oscillator::PhaseOscillator>>;
+    data gripping_oscillator_ids: Vec<usize>;
+    data oscillation_ranges: collections::HashMap<usize, cell::Cell<f64>>;
     data frictional_forces: Vec<cell::Cell<Coordinate>>;
-    data target_angles: cell::RefCell<collections::HashMap<u32, f64>>;
+    data target_angles: cell::RefCell<collections::HashMap<usize, f64>>;
     data torsion_spring_tensions: Vec<cell::Cell<f64>>;
-    data gripping_thresholds: collections::HashMap<u32, cell::Cell<f64>>;
-    data previous_vertical_torsion_spring_angles: collections::HashMap<u32, cell::Cell<f64>>;
+    data gripping_thresholds: collections::HashMap<usize, cell::Cell<f64>>;
+    data previous_vertical_torsion_spring_angles: collections::HashMap<usize, cell::Cell<f64>>;
     def __new__(
         _cls,
         somite_number: usize,
@@ -78,27 +80,31 @@ py_class!(class Caterpillar |py| {
             cell::Cell::new(Coordinate::zero())
         }).collect();
 
-        let mut oscillators = collections::HashMap::<u32, cell::RefCell<phase_oscillator::PhaseOscillator>>::new();
+        let mut oscillators = collections::HashMap::<usize, cell::RefCell<phase_oscillator::PhaseOscillator>>::new();
         for somite_id in somites_to_set_oscillater.iter(py) {
-            let id = somite_id.extract::<u32>(py).unwrap();
+            let id = somite_id.extract::<usize>(py).unwrap();
             oscillators.insert(
                 id,
                 cell::RefCell::<phase_oscillator::PhaseOscillator>::new(phase_oscillator::PhaseOscillator::new())
             );
         }
+        let mut oscillator_ids = oscillators.keys().map(|k| {k.clone()}).collect::<Vec<usize>>();
+        oscillator_ids.sort();
 
-        let mut gripping_oscillators = collections::HashMap::<u32, cell::RefCell<phase_oscillator::PhaseOscillator>>::new();
-        let mut gripping_thresholds = collections::HashMap::<u32, cell::Cell<f64>>::new();
+        let mut gripping_oscillators = collections::HashMap::<usize, cell::RefCell<phase_oscillator::PhaseOscillator>>::new();
+        let mut gripping_thresholds = collections::HashMap::<usize, cell::Cell<f64>>::new();
         for somite_id in somites_to_set_gripper.iter(py) {
-            let id = somite_id.extract::<u32>(py).unwrap();
+            let id = somite_id.extract::<usize>(py).unwrap();
             gripping_oscillators.insert(id, cell::RefCell::<phase_oscillator::PhaseOscillator>::new(phase_oscillator::PhaseOscillator::new()));
             gripping_thresholds.insert(id, cell::Cell::<f64>::new(config.gripping_phase_threshold));
         }
+        let mut gripping_oscillator_ids = gripping_oscillators.keys().map(|k| {k.clone()}).collect::<Vec<usize>>();
+        gripping_oscillator_ids.sort();
 
-        let mut oscillation_ranges = collections::HashMap::<u32, cell::Cell<f64>>::new();
+        let mut oscillation_ranges = collections::HashMap::<usize, cell::Cell<f64>>::new();
         for somite_id in somites_to_set_oscillater.iter(py) {
             oscillation_ranges.insert(
-                somite_id.extract::<u32>(py).unwrap(),
+                somite_id.extract::<usize>(py).unwrap(),
                 cell::Cell::<f64>::new(config.realtime_tunable_ts_rom)
             );
         }
@@ -107,15 +113,15 @@ py_class!(class Caterpillar |py| {
             cell::Cell::new(Coordinate::zero())
         }).collect();
 
-        let target_angles = cell::RefCell::<collections::HashMap<u32, f64>>::new(collections::HashMap::<u32, f64>::new());
+        let target_angles = cell::RefCell::<collections::HashMap<usize, f64>>::new(collections::HashMap::<usize, f64>::new());
 
         let tensions = (0..somite_number-2).map(|_| {
             cell::Cell::<f64>::new(0.)
         }).collect::<Vec<cell::Cell<f64>>>();
 
-        let mut previous_vertical_torsion_spring_angles = collections::HashMap::<u32, cell::Cell<f64>>::new();
+        let mut previous_vertical_torsion_spring_angles = collections::HashMap::<usize, cell::Cell<f64>>::new();
         for i in 1..somite_number-1 {
-            previous_vertical_torsion_spring_angles.insert(i as u32, cell::Cell::<f64>::new(0.));
+            previous_vertical_torsion_spring_angles.insert(i as usize, cell::Cell::<f64>::new(0.));
         }
 
 
@@ -124,10 +130,12 @@ py_class!(class Caterpillar |py| {
             config,
             somites,
             simulation_protocol,
-            cell::Cell::<u32>::new(0),
+            cell::Cell::<usize>::new(0),
             temp_forces,
             oscillators,
+            oscillator_ids,
             gripping_oscillators,
+            gripping_oscillator_ids,
             oscillation_ranges,
             initial_frictions,
             target_angles,
@@ -181,9 +189,8 @@ py_class!(class Caterpillar |py| {
             panic!("number of elements in angle_ranges({}) and oscillator controllers({}) are inconsistent",
                 angle_ranges.len(py), self.oscillators(py).len());
         }
-        let mut range_iter = angle_ranges.iter(py);
-        for (_, range) in self.oscillation_ranges(py) {
-            range.set(range_iter.next().unwrap().extract::<f64>(py).unwrap());
+        for (i, r) in angle_ranges.iter(py).enumerate() {
+            self.oscillation_ranges(py).get(&i).unwrap().set(r.extract::<f64>(py).unwrap());
         }
         Ok(py.None())
     }
@@ -192,9 +199,8 @@ py_class!(class Caterpillar |py| {
             panic!("number of elements in phase_threshold({}) and gripping oscillator controllers({}) are inconsistent",
                 phase_thresholds.len(py), self.gripping_oscillators(py).len());
         }
-        let mut threshold_iter = phase_thresholds.iter(py);
-        for (_, threshold) in self.gripping_thresholds(py) {
-            threshold.set(threshold_iter.next().unwrap().extract::<f64>(py).unwrap());
+        for (i, th) in phase_thresholds.iter(py).enumerate() {
+            self.gripping_thresholds(py).get(&i).unwrap().set(th.extract::<f64>(py).unwrap());
         }
         Ok(py.None())
     }
@@ -217,13 +223,19 @@ py_class!(class Caterpillar |py| {
         if feedbacks_grippers.len(py) != self.gripping_oscillators(py).len() {
             panic!("number of elements in feedbacks_grippers and oscillator controllers for grippers are inconsistent");
         }
-        let mut somite_feedback_iter = feedbacks_somites.iter(py);
-        for (_, oscillator) in self.oscillators(py) {
-            oscillator.borrow_mut().step(self.config(py).normal_angular_velocity + somite_feedback_iter.next().unwrap().extract::<f64>(py).unwrap(), dt);
+        for (i, f) in feedbacks_somites.iter(py).enumerate() {
+            self.oscillators(py)
+                .get(&self.order2somite_oscillator_id(py, i))
+                .unwrap()
+                .borrow_mut()
+                .step(self.config(py).normal_angular_velocity + f.extract::<f64>(py).unwrap(), dt);
         }
-        let mut gripper_feedback_iter = feedbacks_grippers.iter(py);
-        for (_, oscillator) in self.gripping_oscillators(py) {
-            oscillator.borrow_mut().step(self.config(py).normal_angular_velocity + gripper_feedback_iter.next().unwrap().extract::<f64>(py).unwrap(), dt);
+        for (i, f) in feedbacks_grippers.iter(py).enumerate() {
+            self.gripping_oscillators(py)
+            .get(&self.order2gripping_oscillator_id(py, i))
+            .unwrap()
+            .borrow_mut()
+            .step(self.config(py).normal_angular_velocity + f.extract::<f64>(py).unwrap(), dt);
         }
         self.update_state(py, dt);
         Ok(py.None())
@@ -236,11 +248,11 @@ py_class!(class Caterpillar |py| {
             panic!("number of elements in gripper_target_angles and torsion springs are inconsistent");
         }
         for (i, target_angle) in somite_target_angles.iter(py).enumerate() {
-            self.target_angles(py).borrow_mut().insert(i as u32 + 1, target_angle.extract::<f64>(py).unwrap());
+            self.target_angles(py).borrow_mut().insert(i + 1, target_angle.extract::<f64>(py).unwrap());
         }
         let mut gripper_target_angles_iter = gripper_target_angles.iter(py);
         for i in 0..self.somites(py).len() {
-            if let Some(oscillator) = self.gripping_oscillators(py).get(&(i as u32)) {
+            if let Some(oscillator) = self.gripping_oscillators(py).get(&i) {
                 oscillator.borrow_mut().set_phase(gripper_target_angles_iter.next().unwrap().extract::<f64>(py).unwrap());
             }
         }
@@ -316,8 +328,8 @@ impl Caterpillar {
         self.update_somite_verocities(py, time_delta, &new_forces);
         self.update_somite_forces(py, &new_forces);
 
-        let decimation_span: u32 = 10;
-        if self.frame_count(py).get() % decimation_span == (0 as u32) {
+        let decimation_span = 10_usize;
+        if self.frame_count(py).get() % decimation_span == 0_usize {
             // save the step into simulation protocol
             self.simulation_protocol(py).add_frame(
                 self.frame_count(py).get() / decimation_span,
@@ -409,13 +421,13 @@ impl Caterpillar {
                     self.somites(py)[i].get_position(),
                     self.somites(py)[i + 1].get_position(),
                 );
-                match self.target_angles(py).borrow_mut().remove(&(i as u32)) {
+                match self.target_angles(py).borrow_mut().remove(&i) {
                     Some(target_angle) => (target_angle - current_angle).max(0.),
-                    None => match self.oscillators(py).get(&(i as u32)) {
+                    None => match self.oscillators(py).get(&i) {
                         Some(oscillator) => {
                             let target_angle = phase2torsion_spring_target_angle(
                                 oscillator.borrow().get_phase(),
-                                self.oscillation_ranges(py).get(&(i as u32)).unwrap().get(),
+                                self.oscillation_ranges(py).get(&i).unwrap().get(),
                             );
                             target_angle - current_angle
                         }
@@ -529,14 +541,13 @@ impl Caterpillar {
             );
             let angular_velocity = calculations::differentiate(
                 self.previous_vertical_torsion_spring_angles(py)
-                    .get(&(i as u32))
+                    .get(&i)
                     .unwrap()
                     .get(),
                 angle,
                 time_delta,
             ).unwrap();
-            let dumping_coeff = self.config(py).vertical_ts_c
-                * calculations::hysteresis_function(angle, angular_velocity);
+            let dumping_coeff = self.config(py).vertical_ts_c;
             let dumping_torque = -dumping_coeff * angular_velocity; // anti-clock-wise is positive rotation
 
             // torsion spring at i+1 th somite
@@ -553,7 +564,7 @@ impl Caterpillar {
 
             // memorize current angle
             self.previous_vertical_torsion_spring_angles(py)
-                .get(&(i as u32))
+                .get(&i)
                 .unwrap()
                 .set(angle);
         }
@@ -568,24 +579,21 @@ impl Caterpillar {
         mut forces: Vec<Coordinate>,
     ) -> Vec<Coordinate> {
         // discrepancy_angles[i-1] corresponds to a torsion spring on somite i
-        if discrepancy_angles.len() != self.somites(py).len() - 2 {
-            panic!(
-                "discrepancy_angles should be somites.len() - 2 = {}, got {}",
-                self.somites(py).len() - 2,
-                discrepancy_angles.len()
-            );
-        }
+        let mut discrepancy_angles_iter = discrepancy_angles.into_iter();
         for i in 1..(self.somites(py).len() - 1) {
             // torsion spring at i+1 th somite
             let (force_on_t, force_on_b) = t_spring.force_on_discrepancy(
                 self.somites(py)[i - 1].get_position(),
                 self.somites(py)[i].get_position(),
                 self.somites(py)[i + 1].get_position(),
-                discrepancy_angles[i - 1],
+                discrepancy_angles_iter.next().unwrap(),
             );
             forces[i - 1] += force_on_b;
             forces[i] -= force_on_b + force_on_t; // reaction
             forces[i + 1] += force_on_t;
+        }
+        if let Some(_) = discrepancy_angles_iter.next() {
+            panic!("too many elements in discrepancy_angles");
         }
         forces
     }
@@ -620,10 +628,10 @@ impl Caterpillar {
 
     fn add_gripping_forces(&self, py: Python, mut forces: Vec<Coordinate>) -> Vec<Coordinate> {
         for (i, s) in self.somites(py).iter().enumerate() {
-            if let Some(oscillator) = self.gripping_oscillators(py).get(&(i as u32)) {
+            if let Some(oscillator) = self.gripping_oscillators(py).get(&i) {
                 // update grip state
                 if oscillator.borrow().get_phase().sin()
-                    < self.gripping_thresholds(py).get(&(i as u32)).unwrap().get()
+                    < self.gripping_thresholds(py).get(&i).unwrap().get()
                 {
                     if s.is_on_ground() && !s.is_gripping() {
                         s.grip();
@@ -673,6 +681,14 @@ impl Caterpillar {
             }
         }
         forces
+    }
+
+    fn order2somite_oscillator_id(&self, py: Python, i: usize) -> usize {
+        self.oscillator_ids(py)[i]
+    }
+
+    fn order2gripping_oscillator_id(&self, py: Python, i: usize) -> usize {
+        self.gripping_oscillator_ids(py)[i]
     }
 }
 

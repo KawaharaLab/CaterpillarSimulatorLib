@@ -22,20 +22,20 @@ pub struct ObjectPosition {
 #[derive(Serialize, Deserialize)]
 pub struct SimulationProc {
     objects: Vec<Object>,
-    frames: cell::RefCell<collections::HashMap<u32, Vec<ObjectPosition>>>,
+    frames: cell::RefCell<collections::HashMap<usize, Vec<ObjectPosition>>>,
 }
 
 impl SimulationProc {
     pub fn new(objects: Vec<Object>) -> Self {
         SimulationProc {
             objects: objects,
-            frames: cell::RefCell::<collections::HashMap<u32, Vec<ObjectPosition>>>::new(
-                collections::HashMap::<u32, Vec<ObjectPosition>>::new(),
+            frames: cell::RefCell::<collections::HashMap<usize, Vec<ObjectPosition>>>::new(
+                collections::HashMap::<usize, Vec<ObjectPosition>>::new(),
             ),
         }
     }
 
-    pub fn add_frame(&self, frame_order: u32, frame: Vec<ObjectPosition>) {
+    pub fn add_frame(&self, frame_order: usize, frame: Vec<ObjectPosition>) {
         let mut frames = self.frames.borrow_mut();
         for k in frames.keys() {
             if frame_order <= *k {
@@ -60,8 +60,8 @@ mod tests {
     #[test]
     fn test_add_frame() {
         let sim_proc = SimulationProc::new(Vec::<Object>::new());
-        let first: u32 = 0;
-        let second: u32 = 1;
+        let first = 0_usize;
+        let second = 1_usize;
 
         sim_proc.add_frame(
             first,
@@ -111,7 +111,7 @@ mod tests {
     #[should_panic]
     fn panic_on_frame_order_duplicated() {
         let sim_proc = SimulationProc::new(Vec::<Object>::new());
-        let first: u32 = 0;
+        let first = 0_usize;
 
         sim_proc.add_frame(
             first,
@@ -137,8 +137,8 @@ mod tests {
     #[should_panic]
     fn panic_on_frame_order_disturbed() {
         let sim_proc = SimulationProc::new(Vec::<Object>::new());
-        let first: u32 = 0;
-        let second: u32 = 1;
+        let first = 0_usize;
+        let second = 1_usize;
 
         sim_proc.add_frame(
             second,
@@ -175,8 +175,8 @@ mod tests {
                 .collect::<Vec<Object>>(),
         );
 
-        let first: u32 = 0;
-        let second: u32 = 1;
+        let first = 0_usize;
+        let second = 1_usize;
         sim_proc.add_frame(
             first,
             vec![
