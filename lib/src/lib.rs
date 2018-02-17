@@ -200,7 +200,11 @@ py_class!(class Caterpillar |py| {
                 phase_thresholds.len(py), self.gripping_oscillators(py).len());
         }
         for (i, th) in phase_thresholds.iter(py).enumerate() {
-            self.gripping_thresholds(py).get(&i).unwrap().set(th.extract::<f64>(py).unwrap());
+            self.gripping_thresholds(py)
+                .get(&self.order2gripping_oscillator_id(py, i))
+                .unwrap()
+                .set(th.extract::<f64>(py)
+                .unwrap());
         }
         Ok(py.None())
     }
@@ -271,6 +275,9 @@ py_class!(class Caterpillar |py| {
         )
     }
     def tensions(&self) -> PyResult<PyTuple> {
+        // returns tension caused by actuator
+        // returns a tuple of size #somite - 2
+        // if actuator is not set to a somite, that slot will be zero
         Ok(
             PyTuple::new(
                 py,
