@@ -208,6 +208,14 @@ py_class!(class Caterpillar |py| {
         }
         Ok(py.None())
     }
+    def set_target_angle(&self, target_somite_oscillartor: usize, target_angle: f64) -> PyResult<PyObject> {
+        match self.oscillators(py).get(&target_somite_oscillartor) {
+            Some(_) => {},
+            None => panic!("no oscillator is set on somite {}", target_somite_oscillartor),
+        }
+        self.target_angles(py).borrow_mut().insert(target_somite_oscillartor, target_angle % (2.0*f64::consts::PI));
+        Ok(py.None())
+    }
     def step(&self, dt: f64) -> PyResult<PyObject> {
         // update somites' oscillators
         for (_, oscillator) in self.oscillators(py) {
