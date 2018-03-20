@@ -51,16 +51,7 @@ impl Somite {
     }
 
     pub fn new_still_somite(radius: f64, mass: f64, position: coordinate::Coordinate) -> Self {
-        Self::new(
-            radius,
-            mass,
-            position,
-            coordinate::Coordinate {
-                x: 0.,
-                y: 0.,
-                z: 0.,
-            },
-        )
+        Self::new(radius, mass, position, coordinate::Coordinate::zero())
     }
 
     pub fn set_position(&self, position: coordinate::Coordinate) {

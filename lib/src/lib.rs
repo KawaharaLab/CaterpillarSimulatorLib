@@ -18,8 +18,10 @@ mod caterpillar_config;
 mod coordinate;
 mod simulation_export;
 mod calculations;
+mod dynamics;
 
 use coordinate::Coordinate;
+use dynamics::Dynamics;
 
 const GRAVITATIONAL_ACCELERATION: f64 = 9.8065;
 
@@ -49,6 +51,7 @@ py_class!(class Caterpillar |py| {
     data torsion_spring_tensions: Vec<cell::Cell<f64>>;
     data gripping_thresholds: collections::HashMap<usize, cell::Cell<f64>>;
     data previous_vertical_torsion_spring_angles: collections::HashMap<usize, cell::Cell<f64>>;
+    data dynamics: Dynamics;
     def __new__(
         _cls,
         somite_number: usize,
@@ -124,6 +127,13 @@ py_class!(class Caterpillar |py| {
             previous_vertical_torsion_spring_angles.insert(i as usize, cell::Cell::<f64>::new(0.));
         }
 
+        let dy = Dynamics{
+            shear_force_k: config.gripping_shear_stress_k,
+            shear_force_c: config.gripping_shear_stress_c,
+            dynamic_friction_coeff: config.dynamic_friction_coeff,
+            viscosity_friction_coeff: config.viscosity_friction_coeff,
+            grip_phase_threshold: config.gripping_phase_threshold,
+        };
 
         Caterpillar::create_instance(
             py,
@@ -142,6 +152,7 @@ py_class!(class Caterpillar |py| {
             tensions,
             gripping_thresholds,
             previous_vertical_torsion_spring_angles,
+            dy,
         )
     }
     def print_config(&self) -> PyResult<PyString> {
@@ -467,6 +478,7 @@ impl Caterpillar {
         );
 
         // new_forces = self.add_frictional_forces(py, new_forces);
+        self.update_grippers(py);
         new_forces = self.add_gripping_forces(py, new_forces);
 
         self.mask_force_on_landing(py, new_forces)
@@ -641,59 +653,30 @@ impl Caterpillar {
         tensions
     }
 
-    fn add_gripping_forces(&self, py: Python, mut forces: Vec<Coordinate>) -> Vec<Coordinate> {
+    fn update_grippers(&self, py: Python) {
         for (i, s) in self.somites(py).iter().enumerate() {
             if let Some(oscillator) = self.gripping_oscillators(py).get(&i) {
                 // update grip state
-                if oscillator.borrow().get_phase().sin()
-                    < self.gripping_thresholds(py).get(&i).unwrap().get()
-                {
-                    if s.is_on_ground() && !s.is_gripping() {
-                        s.grip();
-                    }
-                } else {
-                    if s.is_gripping() {
-                        s.release();
-                    }
-                }
-
-                // calculate grip force
-                if s.is_gripping() {
-                    let gripping_point = s.get_gripping_point().unwrap();
-                    let friction_x = -self.config(py).gripping_shear_stress_k
-                        * (s.get_position().x - gripping_point.x)
-                        - self.config(py).gripping_shear_stress_c * s.get_verocity().x;
-                    forces[i] += Coordinate::new(friction_x, 0., -1. * forces[i].z.max(0.)); // cancel force along positive z axis
-                    self.frictional_forces(py)[i].set(Coordinate::new(friction_x, 0., 0.));
-                } else {
-                    if s.is_on_ground() {
-                        let dynamic_friction_x = s.get_verocity().x.signum()
-                            * self.config(py).dynamic_friction_coeff
-                            * forces[i].z.min(0.)
-                            - self.config(py).viscosity_friction_coeff * s.get_verocity().x;
-                        forces[i] += Coordinate::new(dynamic_friction_x, 0., 0.);
-                        self.frictional_forces(py)[i].set(Coordinate::new(
-                            dynamic_friction_x,
-                            0.,
-                            0.,
-                        ));
-                    } else {
-                        self.frictional_forces(py)[i].set(Coordinate::zero());
-                    }
-                }
-            } else {
-                // no gripper on the i th somite
-                if s.is_on_ground() {
-                    let dynamic_friction_x = s.get_verocity().x.signum()
-                        * self.config(py).dynamic_friction_coeff
-                        * forces[i].z.min(0.)
-                        - self.config(py).viscosity_friction_coeff * s.get_verocity().x;
-                    forces[i] += Coordinate::new(dynamic_friction_x, 0., 0.);
-                    self.frictional_forces(py)[i].set(Coordinate::new(dynamic_friction_x, 0., 0.));
-                } else {
-                    self.frictional_forces(py)[i].set(Coordinate::zero());
+                if self.dynamics(py).should_grip(&s, oscillator.borrow()) {
+                    s.grip();
+                } else if self.dynamics(py).should_release(&s, oscillator.borrow()) {
+                    s.release();
                 }
             }
+        }
+    }
+
+    fn add_gripping_forces(&self, py: Python, mut forces: Vec<Coordinate>) -> Vec<Coordinate> {
+        for (i, s) in self.somites(py).iter().enumerate() {
+            let has_leg = match self.gripping_oscillators(py).get(&i) {
+                Some(_) => true,
+                None => false,
+            };
+            forces[i] += self.dynamics(py).calculate_somite_shear_force(
+                &s,
+                forces[i].z.min(0.).abs(),
+                has_leg,
+            );
         }
         forces
     }
