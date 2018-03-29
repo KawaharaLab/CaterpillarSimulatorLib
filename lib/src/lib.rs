@@ -131,6 +131,7 @@ py_class!(class Caterpillar |py| {
             shear_force_k: config.gripping_shear_stress_k,
             shear_force_c: config.gripping_shear_stress_c,
             dynamic_friction_coeff: config.dynamic_friction_coeff,
+            static_friction_coeff: config.static_friction_coeff,
             viscosity_friction_coeff: config.viscosity_friction_coeff,
             grip_phase_threshold: config.gripping_phase_threshold,
         };
@@ -672,11 +673,8 @@ impl Caterpillar {
                 Some(_) => true,
                 None => false,
             };
-            forces[i] += self.dynamics(py).calculate_somite_shear_force(
-                &s,
-                forces[i].z.min(0.).abs(),
-                has_leg,
-            );
+            forces[i] += self.dynamics(py)
+                .calculate_somite_shear_force(&s, &forces[i], has_leg);
         }
         forces
     }
