@@ -46,7 +46,7 @@ py_class!(class Caterpillar |py| {
     data gripping_oscillators: collections::HashMap<usize, cell::RefCell<phase_oscillator::PhaseOscillator>>;
     data gripping_oscillator_ids: Vec<usize>;
     data oscillation_ranges: collections::HashMap<usize, cell::Cell<f64>>;
-    data frictional_forces: Vec<cell::Cell<Coordinate>>;
+    data frictional_forces: Vec<cell::Cell<f64>>;
     data target_angles: cell::RefCell<collections::HashMap<usize, f64>>;
     data torsion_spring_tensions: Vec<cell::Cell<f64>>;
     data gripping_thresholds: collections::HashMap<usize, cell::Cell<f64>>;
@@ -113,7 +113,7 @@ py_class!(class Caterpillar |py| {
         }
 
         let initial_frictions = (0..somite_number).map(|_| {
-            cell::Cell::new(Coordinate::zero())
+            cell::Cell::new(0.)
         }).collect();
 
         let target_angles = cell::RefCell::<collections::HashMap<usize, f64>>::new(collections::HashMap::<usize, f64>::new());
@@ -289,7 +289,7 @@ py_class!(class Caterpillar |py| {
             PyTuple::new(
                 py,
                 self.frictional_forces(py).iter().map(|f| {
-                    f.get().x.into_py_object(py).into_object()
+                    f.get().into_py_object(py).into_object()
                 }).collect::<Vec<PyObject>>().as_slice()
             )
         )
@@ -478,7 +478,6 @@ impl Caterpillar {
             new_forces,
         );
 
-        // new_forces = self.add_frictional_forces(py, new_forces);
         self.update_grippers(py);
         new_forces = self.add_gripping_forces(py, new_forces);
 
@@ -673,8 +672,11 @@ impl Caterpillar {
                 Some(_) => true,
                 None => false,
             };
-            forces[i] += self.dynamics(py)
-                .calculate_somite_shear_force(&s, &forces[i], has_leg);
+            let shear_force =
+                self.dynamics(py)
+                    .calculate_somite_shear_force(&s, &forces[i], has_leg);
+            self.frictional_forces(py)[i].set(shear_force.x);
+            forces[i] += shear_force;
         }
         forces
     }
