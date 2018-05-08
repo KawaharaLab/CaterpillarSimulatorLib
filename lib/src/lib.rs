@@ -35,6 +35,45 @@ py_module_initializer!(caterpillar, initcaterpillar, PyInit_caterpillar, |py, m|
     Ok(())
 });
 
+/// Caterpillar simulator which can be used from Python.
+/// 
+/// # Members
+/// config                                      holds config data given from Python caller
+/// somites                                     Vec of somite objects
+/// simulation_protocol                         object to save simulation result
+/// frame_count            
+/// temp_forces                                 place hold external force applied on each somite until next step
+/// oscillators                                 HashMap to somite id and PhaseOscillator objects
+/// oscillator_ids                              Vec of somite ids where oscillators are assigned
+/// gripping_oscillators                        HashMap to somite id of where a grippper is attached and PhaseOscillator objects
+/// gripping_oscillator_ids                     Vec of somite ids where grippers  are attached
+/// oscillation_ranges                          region of motion for each actuator in a somite
+/// frictional_forces                           Vec of friction force object on each somite which is used to tell them to an external controller
+/// target_angles                               HashMap of somite ids where actuators are attached and its bending angle. Used to specify default angles.
+/// torsion_spring_tensions                     Vec of tension values applied on actuators
+/// gripping_thresholds                         HashMap of gripper somite ids and their gripping thresholds
+/// previous_vertical_torsion_spring_angles     
+/// dynamics                                    struct that defines mechanical dynamics
+/// 
+/// # Methods
+/// print_config(&self) -> PyResult<PyString>
+/// show_positions(&self) -> PyResult<PyString>
+/// somite_positions(&self) -> PyResult<PyTuple>
+/// set_positions(&self, somite: usize, x: f64, y: f64, z: f64) -> PyResult<PyObject> 
+/// center_of_mass(&self) -> PyResult<PyTuple> 
+/// head_position(&self) -> PyResult<PyTuple> 
+/// save_simulation(&self, file_path: String) -> PyResult<PyObject> 
+/// set_force_on_somite(&self, somite_number: usize, force: (f64, f64, f64)) -> PyResult<PyObject> 
+/// set_oscillation_ranges(&self, angle_ranges: PyTuple) -> PyResult<PyObject> 
+/// set_gripping_phase_thresholds(&self, phase_thresholds: PyTuple) -> PyResult<PyObject> 
+/// set_target_angle(&self, target_somite_oscillartor: usize, target_angle: f64) -> PyResult<PyObject> 
+/// step(&self, dt: f64) -> PyResult<PyObject> 
+/// step_with_feedbacks(&self, dt: f64, feedbacks_somites: PyTuple, feedbacks_grippers: PyTuple) -> PyResult<PyObject> 
+/// step_with_target_angles(&self, dt: f64, somite_target_angles: PyTuple, gripper_target_angles: PyTuple) -> PyResult<PyObject> 
+/// frictions_x(&self) -> PyResult<PyTuple> 
+/// tensions(&self) -> PyResult<PyTuple> 
+/// somite_phases(&self) -> PyResult<PyTuple> 
+/// gripper_phases(&self) -> PyResult<PyTuple> 
 py_class!(class Caterpillar |py| {
     data config: caterpillar_config::Config;
     data somites: Vec<somite::Somite>;
@@ -65,6 +104,8 @@ py_class!(class Caterpillar |py| {
             None => caterpillar_config::Config::new(),
         };
 
+        // create a vect of somites objects
+        // ordered from the tail to the head
         let somites = (0..somite_number).map(|i| {
             somite::Somite::new_still_somite(
                 config.somite_radius,
@@ -73,16 +114,23 @@ py_class!(class Caterpillar |py| {
             )
         }).collect::<Vec<somite::Somite>>();
 
+        // structure to save simulation data
         let simulation_protocol = simulation_export::SimulationProc::new(
             somites.iter().enumerate().map(|(i, s)| {
                 simulation_export::Object{id: format!("_somite_{}", i), rad: config.somite_radius, pos: s.get_position().to_tuple()}
             }).collect::<Vec<simulation_export::Object>>()
         );
 
+        // vector of force object to save force applied on somite
+        // used to apply force on each somite individually
         let temp_forces = (0..somite_number).map(|_| {
             cell::Cell::new(Coordinate::zero())
         }).collect();
 
+        // oscillators for actuators in somites
+        // Hash
+        //   key: on which somite(id) an oscillator is assigned
+        //   value: instance of PhaseOscillator wrapped by RefCell
         let mut oscillators = collections::HashMap::<usize, cell::RefCell<phase_oscillator::PhaseOscillator>>::new();
         for somite_id in somites_to_set_oscillater.iter(py) {
             let id = somite_id.extract::<usize>(py).unwrap();
@@ -91,42 +139,57 @@ py_class!(class Caterpillar |py| {
                 cell::RefCell::<phase_oscillator::PhaseOscillator>::new(phase_oscillator::PhaseOscillator::new())
             );
         }
+        // vec of somite ids where oscillators are assigned
         let mut oscillator_ids = oscillators.keys().map(|k| {k.clone()}).collect::<Vec<usize>>();
         oscillator_ids.sort();
 
+        // oscillators for grippers
+        // Hash
+        //   key: somite id where an oscillator is assigned
+        //   value: instance of PhaseOscillator wrapped by RefCell
         let mut gripping_oscillators = collections::HashMap::<usize, cell::RefCell<phase_oscillator::PhaseOscillator>>::new();
-        let mut gripping_thresholds = collections::HashMap::<usize, cell::Cell<f64>>::new();
         for somite_id in somites_to_set_gripper.iter(py) {
-            let id = somite_id.extract::<usize>(py).unwrap();
-            gripping_oscillators.insert(id, cell::RefCell::<phase_oscillator::PhaseOscillator>::new(phase_oscillator::PhaseOscillator::new()));
-            gripping_thresholds.insert(id, cell::Cell::<f64>::new(config.gripping_phase_threshold));
-        }
-        let mut gripping_oscillator_ids = gripping_oscillators.keys().map(|k| {k.clone()}).collect::<Vec<usize>>();
-        gripping_oscillator_ids.sort();
-
-        let mut oscillation_ranges = collections::HashMap::<usize, cell::Cell<f64>>::new();
-        for somite_id in somites_to_set_oscillater.iter(py) {
-            oscillation_ranges.insert(
+            gripping_oscillators.insert(
                 somite_id.extract::<usize>(py).unwrap(),
-                cell::Cell::<f64>::new(config.realtime_tunable_ts_rom)
+                cell::RefCell::<phase_oscillator::PhaseOscillator>::new(phase_oscillator::PhaseOscillator::new())
             );
         }
 
-        let initial_frictions = (0..somite_number).map(|_| {
-            cell::Cell::new(0.)
-        }).collect();
+        // thresholds that designate each gripper on which phase it should grip the ground
+        // if sin of oscillator phase is bellow this threshold, a gripper holds the ground
+        // Hash
+        //   key: somite id
+        //   value: threshold of f64 wrapped by Cell
+        let mut gripping_thresholds = collections::HashMap::<usize, cell::Cell<f64>>::new();
+        for somite_id in somites_to_set_gripper.iter(py) {
+            gripping_thresholds.insert(
+                somite_id.extract::<usize>(py).unwrap(),
+                cell::Cell::<f64>::new(config.gripping_phase_threshold)
+            );
+        }
+        // vec of somite ids where gripper oscillators are assigned 
+        let mut gripping_oscillator_ids = gripping_oscillators.keys().map(|k| {k.clone()}).collect::<Vec<usize>>();
+        gripping_oscillator_ids.sort();
 
+        // defines region of motion for each actuator in a somite
+        // Hash
+        //   key: somite id on which a actuator is assigned
+        //   value: region of motion of actuator, i.e., max bending angle
+        let mut oscillation_ranges = collections::HashMap::<usize, cell::Cell<f64>>::new();
+        for somite_id in &oscillator_ids {
+            oscillation_ranges.insert(*somite_id, cell::Cell::<f64>::new(config.realtime_tunable_ts_rom));
+        }
+
+        let initial_frictions = (0..somite_number).map(|_| {cell::Cell::new(0.)}).collect();
         let target_angles = cell::RefCell::<collections::HashMap<usize, f64>>::new(collections::HashMap::<usize, f64>::new());
-
-        let tensions = (0..somite_number-2).map(|_| {
-            cell::Cell::<f64>::new(0.)
-        }).collect::<Vec<cell::Cell<f64>>>();
+        let tensions = (0..somite_number-2).map(|_| {cell::Cell::<f64>::new(0.)}).collect::<Vec<cell::Cell<f64>>>(); // used to save and give it to an external controller
 
         let mut previous_vertical_torsion_spring_angles = collections::HashMap::<usize, cell::Cell<f64>>::new();
         for i in 1..somite_number-1 {
             previous_vertical_torsion_spring_angles.insert(i as usize, cell::Cell::<f64>::new(0.));
         }
 
+        // struct which defines mechanical dynamics
         let dy = Dynamics{
             shear_force_k: config.gripping_shear_stress_k,
             shear_force_c: config.gripping_shear_stress_c,
@@ -329,6 +392,7 @@ py_class!(class Caterpillar |py| {
     }
 });
 
+/// Implementation of Caterpillar simulator.
 impl Caterpillar {
     fn parse_config(py: Python, kwargs: &PyDict) -> caterpillar_config::Config {
         let mut config = caterpillar_config::Config::new();

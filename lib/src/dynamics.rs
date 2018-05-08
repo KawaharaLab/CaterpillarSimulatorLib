@@ -3,6 +3,21 @@ use coordinate::Coordinate;
 use somite::Somite;
 use phase_oscillator::PhaseOscillator;
 
+/// Dynamics defines mechanical dynamics of a system
+/// 
+/// # Example
+/// 
+/// ```
+/// let dy = Dynamics{
+///     shear_force_k: 1.,
+///     shear_force_c: 2.,
+///     dynamic_friction_coeff: 3.,
+///     static_friction_coeff: 4.,
+///     viscosity_friction_coeff: 5.,
+///     grip_phase_threshold: 6.,
+/// };
+/// ```
+/// 
 #[derive(Default)]
 pub struct Dynamics {
     pub shear_force_k: f64,
