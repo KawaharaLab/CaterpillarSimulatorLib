@@ -42,7 +42,7 @@ py_module_initializer!(caterpillar, initcaterpillar, PyInit_caterpillar, |py, m|
 /// somites                                     Vec of somite objects
 /// simulation_protocol                         object to save simulation result
 /// frame_count            
-/// temp_forces                                 place hold external force applied on each somite until next step
+/// temp_forces                                 Vec of force object to hold external force applied on each somite until next step
 /// oscillators                                 HashMap to somite id and PhaseOscillator objects
 /// oscillator_ids                              Vec of somite ids where oscillators are assigned
 /// gripping_oscillators                        HashMap to somite id of where a grippper is attached and PhaseOscillator objects
@@ -53,6 +53,7 @@ py_module_initializer!(caterpillar, initcaterpillar, PyInit_caterpillar, |py, m|
 /// torsion_spring_tensions                     Vec of tension values applied on actuators
 /// gripping_thresholds                         HashMap of gripper somite ids and their gripping thresholds
 /// previous_vertical_torsion_spring_angles     
+/// gravity_angle                               f64 to save gravity direction. 0 corresponds to locomotion on flat plain, 0~pi means climbing, pi means upside-down, pi~2pi means descending. default to 0
 /// dynamics                                    struct that defines mechanical dynamics
 /// 
 /// # Methods
@@ -90,6 +91,7 @@ py_class!(class Caterpillar |py| {
     data torsion_spring_tensions: Vec<cell::Cell<f64>>;
     data gripping_thresholds: collections::HashMap<usize, cell::Cell<f64>>;
     data previous_vertical_torsion_spring_angles: collections::HashMap<usize, cell::Cell<f64>>;
+    data gravity_angle: cell::Cell<f64>;
     data dynamics: Dynamics;
     def __new__(
         _cls,
@@ -216,6 +218,7 @@ py_class!(class Caterpillar |py| {
             tensions,
             gripping_thresholds,
             previous_vertical_torsion_spring_angles,
+            cell::Cell::new(0.0),
             dy,
         )
     }
@@ -310,6 +313,7 @@ py_class!(class Caterpillar |py| {
         if feedbacks_grippers.len(py) != self.gripping_oscillators(py).len() {
             panic!("number of elements in feedbacks_grippers and oscillator controllers for grippers are inconsistent");
         }
+        // update phase oscillators for somite actuators
         for (i, f) in feedbacks_somites.iter(py).enumerate() {
             self.oscillators(py)
                 .get(&self.order2somite_oscillator_id(py, i))
@@ -317,6 +321,7 @@ py_class!(class Caterpillar |py| {
                 .borrow_mut()
                 .step(self.config(py).normal_angular_velocity + f.extract::<f64>(py).unwrap(), dt);
         }
+        // update phase oscillators for grippers
         for (i, f) in feedbacks_grippers.iter(py).enumerate() {
             self.gripping_oscillators(py)
             .get(&self.order2gripping_oscillator_id(py, i))
@@ -390,6 +395,10 @@ py_class!(class Caterpillar |py| {
             )
         )
     }
+    def set_gravity_angle(&self, new_angle: f64) -> PyResult<PyObject>{
+        self.gravity_angle(py).set(new_angle);
+        Ok(py.None())
+    }
 });
 
 /// Implementation of Caterpillar simulator.
@@ -419,6 +428,7 @@ impl Caterpillar {
         self.update_somite_verocities(py, time_delta, &new_forces);
         self.update_somite_forces(py, &new_forces);
 
+        // save simulation result
         let decimation_span = 10_usize;
         if self.frame_count(py).get() % decimation_span == 0_usize {
             // save the step into simulation protocol
@@ -561,7 +571,8 @@ impl Caterpillar {
 
     fn add_gravitational_forces(&self, py: Python, mut forces: Vec<Coordinate>) -> Vec<Coordinate> {
         for (i, s) in self.somites(py).iter().enumerate() {
-            forces[i].z += -GRAVITATIONAL_ACCELERATION * s.mass
+            forces[i].z += -GRAVITATIONAL_ACCELERATION * s.mass * self.gravity_angle(py).get().cos();
+            forces[i].x += -GRAVITATIONAL_ACCELERATION * s.mass * self.gravity_angle(py).get().sin();
         }
         forces
     }
