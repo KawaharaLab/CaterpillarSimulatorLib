@@ -399,6 +399,9 @@ py_class!(class Caterpillar |py| {
         self.gravity_angle(py).set(new_angle);
         Ok(py.None())
     }
+    def is_on_ground(&self) -> PyResult<bool> {
+        Ok(self.somites(py).iter().fold(false, |acc, ref s| acc || s.is_on_ground()))
+    }
 });
 
 /// Implementation of Caterpillar simulator.
