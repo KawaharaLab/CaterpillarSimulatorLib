@@ -75,6 +75,8 @@ py_module_initializer!(caterpillar, initcaterpillar, PyInit_caterpillar, |py, m|
 /// tensions(&self) -> PyResult<PyTuple> 
 /// somite_phases(&self) -> PyResult<PyTuple> 
 /// gripper_phases(&self) -> PyResult<PyTuple> 
+/// set_gravity_angle(&self, new_angle: f64) -> PyResult<PyObject>
+/// is_on_ground(&self) -> PyResult<bool>
 py_class!(class Caterpillar |py| {
     data config: caterpillar_config::Config;
     data somites: Vec<somite::Somite>;
@@ -401,6 +403,11 @@ py_class!(class Caterpillar |py| {
     }
     def is_on_ground(&self) -> PyResult<bool> {
         Ok(self.somites(py).iter().fold(false, |acc, ref s| acc || s.is_on_ground()))
+    }
+    def set_gripper_phase(&self, somite_id: i64, phase: f64) -> PyResult<PyObject> {
+        // set phase of gripper oscillator on soimte designated by somite_id
+        self.gripping_oscillators(py).get(&(somite_id as usize)).unwrap().borrow_mut().set_phase(phase);
+        Ok(py.None())
     }
 });
 
