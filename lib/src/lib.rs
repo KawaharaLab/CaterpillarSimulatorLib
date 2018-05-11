@@ -50,7 +50,7 @@ py_module_initializer!(caterpillar, initcaterpillar, PyInit_caterpillar, |py, m|
 /// oscillation_ranges                          region of motion for each actuator in a somite
 /// frictional_forces                           Vec of friction force object on each somite which is used to tell them to an external controller
 /// target_angles                               HashMap of somite ids where actuators are attached and its bending angle. Used to specify default angles.
-/// torsion_spring_tensions                     Vec of tension values applied on actuators
+/// realtime_tunable_torsion_spring_tensions                     Vec of tension values applied on actuators
 /// gripping_thresholds                         HashMap of gripper somite ids and their gripping thresholds
 /// previous_vertical_torsion_spring_angles     
 /// dynamics                                    struct that defines mechanical dynamics
@@ -87,7 +87,7 @@ py_class!(class Caterpillar |py| {
     data oscillation_ranges: collections::HashMap<usize, cell::Cell<f64>>;
     data frictional_forces: Vec<cell::Cell<f64>>;
     data target_angles: cell::RefCell<collections::HashMap<usize, f64>>;
-    data torsion_spring_tensions: Vec<cell::Cell<f64>>;
+    data realtime_tunable_torsion_spring_tensions: Vec<cell::Cell<f64>>;
     data gripping_thresholds: collections::HashMap<usize, cell::Cell<f64>>;
     data previous_vertical_torsion_spring_angles: collections::HashMap<usize, cell::Cell<f64>>;
     data dynamics: Dynamics;
@@ -364,7 +364,7 @@ py_class!(class Caterpillar |py| {
         Ok(
             PyTuple::new(
                 py,
-                self.torsion_spring_tensions(py).iter().map(|tension| {
+                self.realtime_tunable_torsion_spring_tensions(py).iter().map(|tension| {
                     tension.get().into_py_object(py).into_object()
                 }).collect::<Vec<PyObject>>().as_slice(),
             )
@@ -504,6 +504,7 @@ impl Caterpillar {
             0.,
             Coordinate::new(0., 1., 0.),
         );
+        // discrepancy angle is positive only if vertical realtime tunable spring is set, except for when target angle is set
         let vertical_discrepancy_angles = (1..self.somites(py).len() - 1)
             .map(|i| {
                 // i is somite id
@@ -527,14 +528,16 @@ impl Caterpillar {
                 }
             })
             .collect::<Vec<f64>>();
-        let torsion_spring_tensions = self.calculate_realtime_tunable_torsion_spring_tensions(
+        // calculate tension applied on each actuator for external reference
+        let realtime_tunable_torsion_spring_tensions = self.calculate_realtime_tunable_torsion_spring_tensions(
             py,
             &vertical_realtime_tunable_ts,
             &vertical_discrepancy_angles,
         );
-        for (i, tension) in torsion_spring_tensions.into_iter().enumerate() {
-            self.torsion_spring_tensions(py)[i].set(tension);
+        for (i, tension) in realtime_tunable_torsion_spring_tensions.into_iter().enumerate() {
+            self.realtime_tunable_torsion_spring_tensions(py)[i].set(tension);
         }
+        // add force comming from actuators
         new_forces = self.add_realtime_tunable_torsion_spring_forces(
             py,
             vertical_realtime_tunable_ts,
