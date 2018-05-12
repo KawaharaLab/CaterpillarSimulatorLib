@@ -195,8 +195,8 @@ py_class!(class Caterpillar |py| {
 
         // struct which defines mechanical dynamics
         let dy = Dynamics{
-            shear_force_k: config.gripping_shear_stress_k,
-            shear_force_c: config.gripping_shear_stress_c,
+            gripper_k: config.gripping_shear_stress_k,
+            gripper_c: config.gripping_shear_stress_c,
             dynamic_friction_coeff: config.dynamic_friction_coeff,
             static_friction_coeff: config.static_friction_coeff,
             viscosity_friction_coeff: config.viscosity_friction_coeff,
@@ -751,17 +751,16 @@ impl Caterpillar {
         }
     }
 
+    /// add shear force, i.e., force long to x axis, and force along z axis caused by gripper
     fn add_gripping_forces(&self, py: Python, mut forces: Vec<Coordinate>) -> Vec<Coordinate> {
         for (i, s) in self.somites(py).iter().enumerate() {
             let has_leg = match self.gripping_oscillators(py).get(&i) {
                 Some(_) => true,
                 None => false,
             };
-            let shear_force =
-                self.dynamics(py)
-                    .calculate_somite_shear_force(&s, &forces[i], has_leg);
-            self.frictional_forces(py)[i].set(shear_force.x);
-            forces[i] += shear_force;
+            let gripping_force = self.dynamics(py).calculate_somite_shear_force(&s, &forces[i], has_leg);
+            self.frictional_forces(py)[i].set(gripping_force.x); // set for reference from external controller
+            forces[i] += gripping_force;
         }
         forces
     }
