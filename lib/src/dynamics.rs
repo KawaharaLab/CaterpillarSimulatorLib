@@ -9,8 +9,8 @@ use phase_oscillator::PhaseOscillator;
 /// 
 /// ```
 /// let dy = Dynamics{
-///     gripper_k: 1.,
-///     gripper_c: 2.,
+///     shear_force_k: 1.,
+///     shear_force_c: 2.,
 ///     dynamic_friction_coeff: 3.,
 ///     static_friction_coeff: 4.,
 ///     viscosity_friction_coeff: 5.,
@@ -20,8 +20,8 @@ use phase_oscillator::PhaseOscillator;
 /// 
 #[derive(Default)]
 pub struct Dynamics {
-    pub gripper_k: f64,
-    pub gripper_c: f64,
+    pub shear_force_k: f64,
+    pub shear_force_c: f64,
     pub dynamic_friction_coeff: f64,
     pub static_friction_coeff: f64,
     pub viscosity_friction_coeff: f64,
@@ -36,7 +36,11 @@ impl Dynamics {
         if has_leg {
             if let Some(grip_point) = somite.get_gripping_point() {
                 // gripping
-                self.gripping_force(&grip_point, &somite.get_position(), &somite.get_verocity())
+                Coordinate::new(
+                    self.grip_shear_force(grip_point.x, somite.get_position().x, somite.get_verocity().x),
+                    0.,
+                    - applied_force.z, // cancel force along z axis if gripping
+                )
             } else {
                 if somite.is_on_ground() {
                     // not gripping but on the ground
@@ -50,7 +54,11 @@ impl Dynamics {
         } else {
             if somite.is_on_ground() {
                 // no gripper but on the ground
-                Coordinate::new(self.shear_friction(somite.get_verocity(), applied_force), 0., 0.)
+                Coordinate::new(
+                    self.shear_friction(somite.get_verocity(), applied_force),
+                    0.,
+                    0.,
+                )
             } else {
                 // in the air
                 Coordinate::zero()
@@ -58,12 +66,8 @@ impl Dynamics {
         }
     }
 
-    fn gripping_force(&self, resting_point: &Coordinate, current_point: &Coordinate, verocity: &Coordinate) -> Coordinate{
-        Coordinate::new(
-            -self.gripper_k * (current_point.x - resting_point.x) - self.gripper_c * verocity.x,
-            0.,
-            -self.gripper_k * (current_point.z - resting_point.z) - self.gripper_c * verocity.z,
-        )
+    fn grip_shear_force(&self, resting_point: f64, current_point: f64, verocity: f64) -> f64 {
+        -self.shear_force_k * (current_point - resting_point) - self.shear_force_c * verocity
     }
 
     fn shear_friction(&self, verocity: Coordinate, applied_force: &Coordinate) -> f64 {
@@ -112,8 +116,8 @@ mod test {
     #[test]
     fn test_calculate_shear_force_while_gripping() {
         let d = Dynamics {
-            gripper_k: 10.,
-            gripper_c: 20.,
+            shear_force_k: 10.,
+            shear_force_c: 20.,
             ..Default::default()
         };
         let s = Somite::new(
@@ -126,7 +130,7 @@ mod test {
         s.set_position(Coordinate::new(1., 0., 1.));
         let force_applied = Coordinate::new(5., 0., -6.);
         let shear_force = d.calculate_somite_shear_force(&s, &force_applied, true);
-        let expected = Coordinate::new(-d.gripper_c * -2. + -d.gripper_k * 1., 0., 0.);
+        let expected = Coordinate::new(-d.shear_force_c * -2. + -d.shear_force_k * 1., 0., 6.);
         assert_eq!(
             shear_force, expected,
             "while gripping, expected {}, got {}",

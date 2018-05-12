@@ -195,8 +195,8 @@ py_class!(class Caterpillar |py| {
 
         // struct which defines mechanical dynamics
         let dy = Dynamics{
-            gripper_k: config.gripping_shear_stress_k,
-            gripper_c: config.gripping_shear_stress_c,
+            shear_force_k: config.gripping_shear_stress_k,
+            shear_force_c: config.gripping_shear_stress_c,
             dynamic_friction_coeff: config.dynamic_friction_coeff,
             static_friction_coeff: config.static_friction_coeff,
             viscosity_friction_coeff: config.viscosity_friction_coeff,
