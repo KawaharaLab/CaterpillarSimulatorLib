@@ -7,6 +7,7 @@ extern crate serde_derive;
 use std::f64;
 use std::cell;
 use std::collections;
+use std::io::{self, Write};
 use cpython::{PyDict, PyObject, PyResult, PyString, PyTuple, Python, PythonObject, ToPyObject};
 
 mod phase_oscillator;
@@ -34,9 +35,9 @@ py_module_initializer!(caterpillar, initcaterpillar, PyInit_caterpillar, |py, m|
     try!(m.add_class::<Caterpillar>(py));
     Ok(())
 });
-
 /// Caterpillar simulator which can be used from Python.
 /// 
+
 /// # Members
 /// config                                      holds config data given from Python caller
 /// somites                                     Vec of somite objects
