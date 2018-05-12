@@ -20,7 +20,8 @@ pub struct Config {
     pub vertical_ts_k1: f64,
     pub vertical_ts_c: f64,
     pub vertical_realtime_tunable_torsion_spirng_k: f64,
-    pub realtime_tunable_ts_rom: f64,
+    pub realtime_tunable_ts_rom_min: f64,
+    pub realtime_tunable_ts_rom_max: f64,
     pub static_friction_coeff: f64,
     pub dynamic_friction_coeff: f64,
     pub viscosity_friction_coeff: f64,
@@ -58,7 +59,8 @@ impl Config {
             "vertical_realtime_tunable_torsion_spirng_k" => {
                 self.vertical_realtime_tunable_torsion_spirng_k = val
             }
-            "realtime_tunable_ts_rom" => self.realtime_tunable_ts_rom = val,
+            "realtime_tunable_ts_rom_min" => self.realtime_tunable_ts_rom_min = val,
+            "realtime_tunable_ts_rom_max" => self.realtime_tunable_ts_rom_max = val,
             "static_friction_coeff" => self.static_friction_coeff = val,
             "dynamic_friction_coeff" => self.dynamic_friction_coeff = val,
             "viscosity_friction_coeff" => self.viscosity_friction_coeff = val,
@@ -94,7 +96,8 @@ impl default::Default for Config {
             vertical_ts_k1: 0.,                                    // N/rad
             vertical_ts_c: 0.,                                     // Ns/rad
             vertical_realtime_tunable_torsion_spirng_k: 10.,       // N/rad
-            realtime_tunable_ts_rom: 0.5 * f64::consts::PI,        // rad
+            realtime_tunable_ts_rom_min: -0.3 * f64::consts::PI,        // rad
+            realtime_tunable_ts_rom_max: 0.5 * f64::consts::PI,        // rad
             static_friction_coeff: 10.,                            //
             dynamic_friction_coeff: 7.,                            //
             viscosity_friction_coeff: 5.,                          // Ns/m
@@ -142,7 +145,7 @@ impl fmt::Display for Config {
              vertical c: {} Ns/rad\n\
              vertical_realtime_tunable_torsion_spirng_k: {} N/rad\n\
              [realtime tunable torsion spring]
-             range of motion: {} rad\n\
+             range of motion: {}~{} rad\n\
              [gripping]
              gripping shear stress k: {} N/m\n\
              gripping shear stress c: {} Ns/m\n\
@@ -171,7 +174,8 @@ impl fmt::Display for Config {
             self.vertical_ts_k1,
             self.vertical_ts_c,
             self.vertical_realtime_tunable_torsion_spirng_k,
-            self.realtime_tunable_ts_rom,
+            self.realtime_tunable_ts_rom_min,
+            self.realtime_tunable_ts_rom_max,
             self.gripping_shear_stress_k,
             self.gripping_shear_stress_c,
             self.time_delta,

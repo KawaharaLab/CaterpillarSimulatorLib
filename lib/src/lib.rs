@@ -7,7 +7,6 @@ extern crate serde_derive;
 use std::f64;
 use std::cell;
 use std::collections;
-use std::io::{self, Write};
 use cpython::{PyDict, PyObject, PyResult, PyString, PyTuple, Python, PythonObject, ToPyObject};
 
 mod phase_oscillator;
@@ -182,7 +181,7 @@ py_class!(class Caterpillar |py| {
         //   value: region of motion of actuator, i.e., max bending angle
         let mut oscillation_ranges = collections::HashMap::<usize, cell::Cell<f64>>::new();
         for somite_id in &oscillator_ids {
-            oscillation_ranges.insert(*somite_id, cell::Cell::<f64>::new(config.realtime_tunable_ts_rom));
+            oscillation_ranges.insert(*somite_id, cell::Cell::<f64>::new(config.realtime_tunable_ts_rom_min));
         }
 
         let initial_frictions = (0..somite_number).map(|_| {cell::Cell::new(0.)}).collect();
@@ -539,7 +538,8 @@ impl Caterpillar {
                         Some(oscillator) => {
                             let target_angle = phase2torsion_spring_target_angle(
                                 oscillator.borrow().get_phase(),
-                                self.oscillation_ranges(py).get(&i).unwrap().get(),
+                                self.config(py).realtime_tunable_ts_rom_min,
+                                self.config(py).realtime_tunable_ts_rom_max,
                             );
                             target_angle - current_angle
                         }
@@ -775,6 +775,6 @@ impl Caterpillar {
     }
 }
 
-fn phase2torsion_spring_target_angle(phase: f64, range: f64) -> f64 {
-    range * (1. - phase.cos()) * 0.5
+fn phase2torsion_spring_target_angle(phase: f64, range_min: f64, range_max: f64) -> f64 {
+    (range_max - range_min) * (1. - phase.cos()) * 0.5 + range_min
 }
