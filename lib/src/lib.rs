@@ -48,7 +48,8 @@ py_module_initializer!(caterpillar, initcaterpillar, PyInit_caterpillar, |py, m|
 /// gripping_oscillators                        HashMap to somite id of where a grippper is attached and PhaseOscillator objects
 /// gripping_oscillator_ids                     Vec of somite ids where grippers  are attached
 /// oscillation_ranges                          region of motion for each actuator in a somite
-/// frictional_forces                           Vec of friction force object on each somite which is used to tell them to an external controller
+/// frictional_forces                           Vec of force objects to save friction on each somite which is used to tell them to an external controller
+/// gripping_forces                             Vec of force object to save gripping force on each somite which is used to tell them to an external controller
 /// target_angles                               HashMap of somite ids where actuators are attached and its bending angle. Used to specify default angles.
 /// torsion_spring_tensions                     Vec of tension values applied on actuators
 /// gripping_thresholds                         HashMap of gripper somite ids and their gripping thresholds
@@ -72,6 +73,8 @@ py_module_initializer!(caterpillar, initcaterpillar, PyInit_caterpillar, |py, m|
 /// step_with_feedbacks(&self, dt: f64, feedbacks_somites: PyTuple, feedbacks_grippers: PyTuple) -> PyResult<PyObject> 
 /// step_with_target_angles(&self, dt: f64, somite_target_angles: PyTuple, gripper_target_angles: PyTuple) -> PyResult<PyObject> 
 /// frictions_x(&self) -> PyResult<PyTuple> 
+/// gripping_force_x(&self) -> PyResult<PyTuple> 
+/// gripping_force_z(&self) -> PyResult<PyTuple> 
 /// tensions(&self) -> PyResult<PyTuple> 
 /// somite_phases(&self) -> PyResult<PyTuple> 
 /// gripper_phases(&self) -> PyResult<PyTuple> 
@@ -88,7 +91,8 @@ py_class!(class Caterpillar |py| {
     data gripping_oscillators: collections::HashMap<usize, cell::RefCell<phase_oscillator::PhaseOscillator>>;
     data gripping_oscillator_ids: Vec<usize>;
     data oscillation_ranges: collections::HashMap<usize, cell::Cell<f64>>;
-    data frictional_forces: Vec<cell::Cell<f64>>;
+    data frictional_forces: Vec<cell::Cell<Coordinate>>;
+    data gripping_forces: Vec<cell::Cell<Coordinate>>;
     data target_angles: cell::RefCell<collections::HashMap<usize, f64>>;
     data torsion_spring_tensions: Vec<cell::Cell<f64>>;
     data gripping_thresholds: collections::HashMap<usize, cell::Cell<f64>>;
@@ -184,7 +188,8 @@ py_class!(class Caterpillar |py| {
             oscillation_ranges.insert(*somite_id, cell::Cell::<f64>::new(config.realtime_tunable_ts_rom_min));
         }
 
-        let initial_frictions = (0..somite_number).map(|_| {cell::Cell::new(0.)}).collect();
+        let initial_frictions = (0..somite_number).map(|_| {cell::Cell::new(Coordinate::zero())}).collect();
+        let initial_gripping_force = (0..somite_number).map(|_| {cell::Cell::new(Coordinate::zero())}).collect();
         let target_angles = cell::RefCell::<collections::HashMap<usize, f64>>::new(collections::HashMap::<usize, f64>::new());
         let tensions = (0..somite_number-2).map(|_| {cell::Cell::<f64>::new(0.)}).collect::<Vec<cell::Cell<f64>>>(); // used to save and give it to an external controller
 
@@ -216,6 +221,7 @@ py_class!(class Caterpillar |py| {
             gripping_oscillator_ids,
             oscillation_ranges,
             initial_frictions,
+            initial_gripping_force,
             target_angles,
             tensions,
             gripping_thresholds,
@@ -358,9 +364,23 @@ py_class!(class Caterpillar |py| {
         Ok(
             PyTuple::new(
                 py,
-                self.frictional_forces(py).iter().map(|f| {
-                    f.get().into_py_object(py).into_object()
-                }).collect::<Vec<PyObject>>().as_slice()
+                self.frictional_forces(py).iter().map(|f| {f.get().x.into_py_object(py).into_object()}).collect::<Vec<PyObject>>().as_slice()
+            )
+        )
+    }
+    def gripping_force_x(&self) -> PyResult<PyTuple> {
+        Ok(
+            PyTuple::new(
+                py,
+                self.gripping_forces(py).iter().map(|f| {f.get().x.into_py_object(py).into_object()}).collect::<Vec<PyObject>>().as_slice()
+            )
+        )
+    }
+    def gripping_force_z(&self) -> PyResult<PyTuple> {
+        Ok(
+            PyTuple::new(
+                py,
+                self.gripping_forces(py).iter().map(|f| {f.get().z.into_py_object(py).into_object()}).collect::<Vec<PyObject>>().as_slice()
             )
         )
     }
@@ -755,13 +775,17 @@ impl Caterpillar {
     /// add shear force, i.e., force long to x axis, and force along z axis caused by gripper
     fn add_gripping_forces(&self, py: Python, mut forces: Vec<Coordinate>) -> Vec<Coordinate> {
         for (i, s) in self.somites(py).iter().enumerate() {
-            let has_leg = match self.gripping_oscillators(py).get(&i) {
-                Some(_) => true,
-                None => false,
-            };
-            let gripping_force = self.dynamics(py).calculate_somite_shear_force(&s, &forces[i], has_leg);
-            self.frictional_forces(py)[i].set(gripping_force.x); // set for reference from external controller
-            forces[i] += gripping_force;
+            if let Some(_) = s.get_gripping_point() { // grip point being set means the somite has a leg
+                let gripping_force = self.dynamics(py).calculate_gripping_force(&s, &forces[i]);
+                forces[i] += gripping_force;
+                self.gripping_forces(py)[i].set(gripping_force); // for external reference
+                self.frictional_forces(py)[i].set(Coordinate::zero()); // for external reference
+            } else if s.is_on_ground() {
+                let friction = self.dynamics(py).calculate_friction(&s, &forces[i]);
+                forces[i] += friction;
+                self.gripping_forces(py)[i].set(Coordinate::zero()); // for external reference
+                self.frictional_forces(py)[i].set(friction); // for external reference
+            }
         }
         forces
     }

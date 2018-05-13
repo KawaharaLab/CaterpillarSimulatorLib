@@ -29,41 +29,20 @@ pub struct Dynamics {
 }
 
 impl Dynamics {
+    /// Calculate shear force caused by friction between a somite and the substrate.
+    pub fn calculate_friction(&self, somite: &Somite, applied_force: &Coordinate) -> Coordinate {
+        Coordinate::new(self.shear_friction(somite.get_verocity(), applied_force), 0., 0.)
+    }
+
     /// Calculate force caused by a gripper.
     /// Gripping force is modeled by strong springs.
     /// The gripping force only acts when gripping.
-    pub fn calculate_somite_shear_force(&self, somite: &Somite, applied_force: &Coordinate, has_leg: bool) -> Coordinate {
-        if has_leg {
-            if let Some(grip_point) = somite.get_gripping_point() {
-                // gripping
-                Coordinate::new(
-                    self.grip_shear_force(grip_point.x, somite.get_position().x, somite.get_verocity().x),
-                    0.,
-                    - applied_force.z, // cancel force along z axis if gripping
-                )
-            } else {
-                if somite.is_on_ground() {
-                    // not gripping but on the ground
-                    let f_x = self.shear_friction(somite.get_verocity(), applied_force);
-                    Coordinate::new(f_x, 0., 0.)
-                } else {
-                    // in the air
-                    Coordinate::zero()
-                }
-            }
-        } else {
-            if somite.is_on_ground() {
-                // no gripper but on the ground
-                Coordinate::new(
-                    self.shear_friction(somite.get_verocity(), applied_force),
-                    0.,
-                    0.,
-                )
-            } else {
-                // in the air
-                Coordinate::zero()
-            }
-        }
+    pub fn calculate_gripping_force(&self, somite: &Somite, applied_force: &Coordinate) -> Coordinate {
+        Coordinate::new(
+            self.grip_shear_force(somite.get_gripping_point().unwrap().x, somite.get_position().x, somite.get_verocity().x),
+            0.,
+            - applied_force.z, // cancel force along z axis if gripping
+        )
     }
 
     fn grip_shear_force(&self, resting_point: f64, current_point: f64, verocity: f64) -> f64 {
@@ -114,7 +93,7 @@ mod test {
     use phase_oscillator::PhaseOscillator;
 
     #[test]
-    fn test_calculate_shear_force_while_gripping() {
+    fn test_calculate_gripping_force() {
         let d = Dynamics {
             shear_force_k: 10.,
             shear_force_c: 20.,
@@ -129,109 +108,68 @@ mod test {
         s.grip();
         s.set_position(Coordinate::new(1., 0., 1.));
         let force_applied = Coordinate::new(5., 0., -6.);
-        let shear_force = d.calculate_somite_shear_force(&s, &force_applied, true);
+        let gripping_force = d.calculate_gripping_force(&s, &force_applied);
         let expected = Coordinate::new(-d.shear_force_c * -2. + -d.shear_force_k * 1., 0., 6.);
         assert_eq!(
-            shear_force, expected,
+            gripping_force, expected,
             "while gripping, expected {}, got {}",
-            expected, shear_force
+            expected, gripping_force
         );
     }
 
     #[test]
-    fn test_calculate_shear_force_in_air() {
-        let d = Dynamics {
-            ..Default::default()
-        };
-        let s = Somite::new(
-            1.,
-            1.,
-            Coordinate::new(0., 0., 1.1),
-            Coordinate::new(-2., 0., 0.),
-        );
-        let force_applied = Coordinate::new(5., 0., -6.);
-        let shear_force = d.calculate_somite_shear_force(&s, &force_applied, true);
-        let expected = Coordinate::new(0., 0., 0.);
-        assert_eq!(
-            shear_force, expected,
-            "while in the air, expected {}, got {}",
-            expected, shear_force
-        );
-    }
-
-    #[test]
-    fn test_calculate_shear_force_while_released_and_moving() {
+    fn test_calculate_friction_dynamic() {
         let d = Dynamics {
             dynamic_friction_coeff: 3.,
             viscosity_friction_coeff: 4.,
             ..Default::default()
         };
-        let s = Somite::new(
-            1.,
-            1.,
-            Coordinate::new(0., 0., 1.),
-            Coordinate::new(-2., 0., 0.),
-        );
+        let s = Somite::new(1., 1., Coordinate::new(0., 0., 1.), Coordinate::new(-2., 0., 0.));
         let force_applied = Coordinate::new(5., 0., -6.);
-        let shear_force = d.calculate_somite_shear_force(&s, &force_applied, true);
+        let friction = d.calculate_friction(&s, &force_applied);
         let expected = Coordinate::new(
-            -d.dynamic_friction_coeff * (-6.0_f64).abs() * (-1.)
-                - d.viscosity_friction_coeff * (-2.),
+            -d.dynamic_friction_coeff * (-6.0_f64).abs() * (-1.) - d.viscosity_friction_coeff * (-2.),
             0.,
             0.,
         );
         assert_eq!(
-            shear_force, expected,
+            friction, expected,
             "while released and moving, expected {}, got {}",
-            expected, shear_force
+            expected, friction
         );
     }
 
     #[test]
-    fn test_calculate_shear_force_while_released_and_still() {
+    fn test_calculate_friction_static() {
         let d = Dynamics {
             static_friction_coeff: 3.,
             ..Default::default()
         };
-        let s = Somite::new(
-            1.,
-            1.,
-            Coordinate::new(0., 0., 1.),
-            Coordinate::new(0., 0., 0.),
-        );
+        let s = Somite::new(1., 1., Coordinate::new(0., 0., 1.), Coordinate::new(0., 0., 0.));
         let force_applied = Coordinate::new(5., 0., -6.);
-        let shear_force = d.calculate_somite_shear_force(&s, &force_applied, true);
+        let friction = d.calculate_friction(&s, &force_applied);
         let expected = Coordinate::new(-5., 0., 0.);
         assert_eq!(
-            shear_force, expected,
+            friction, expected,
             "while released and moving, expected {}, got {}",
-            expected, shear_force
+            expected, friction
         );
     }
 
     #[test]
-    fn test_calculate_shear_force_while_released_and_still_beyound_max_static_friction() {
+    fn test_calculate_friction_maximum_static() {
         let d = Dynamics {
             static_friction_coeff: 3.,
             ..Default::default()
         };
-        let s = Somite::new(
-            1.,
-            1.,
-            Coordinate::new(0., 0., 1.),
-            Coordinate::new(0., 0., 0.),
-        );
+        let s = Somite::new( 1., 1., Coordinate::new(0., 0., 1.), Coordinate::new(0., 0., 0.));
         let force_applied = Coordinate::new(20., 0., -6.);
-        let shear_force = d.calculate_somite_shear_force(&s, &force_applied, true);
-        let expected = Coordinate::new(
-            -d.static_friction_coeff * (-6.0_f64).abs() * (20.0_f64).signum(),
-            0.,
-            0.,
-        );
+        let friction = d.calculate_friction(&s, &force_applied);
+        let expected = Coordinate::new( -d.static_friction_coeff * (-6.0_f64).abs() * (20.0_f64).signum(), 0., 0.);
         assert_eq!(
-            shear_force, expected,
+            friction, expected,
             "while released, moving, and applied force is larger than max static friction, expected {}, got {}",
-            expected, shear_force
+            expected, friction
         );
     }
 
