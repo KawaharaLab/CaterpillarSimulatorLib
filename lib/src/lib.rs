@@ -34,25 +34,27 @@ py_module_initializer!(caterpillar, initcaterpillar, PyInit_caterpillar, |py, m|
     try!(m.add_class::<Caterpillar>(py));
     Ok(())
 });
-
 /// Caterpillar simulator which can be used from Python.
 /// 
+
 /// # Members
 /// config                                      holds config data given from Python caller
 /// somites                                     Vec of somite objects
 /// simulation_protocol                         object to save simulation result
 /// frame_count            
-/// temp_forces                                 place hold external force applied on each somite until next step
+/// temp_forces                                 Vec of force object to hold external force applied on each somite until next step
 /// oscillators                                 HashMap to somite id and PhaseOscillator objects
 /// oscillator_ids                              Vec of somite ids where oscillators are assigned
 /// gripping_oscillators                        HashMap to somite id of where a grippper is attached and PhaseOscillator objects
 /// gripping_oscillator_ids                     Vec of somite ids where grippers  are attached
 /// oscillation_ranges                          region of motion for each actuator in a somite
-/// frictional_forces                           Vec of friction force object on each somite which is used to tell them to an external controller
+/// frictional_forces                           Vec of force objects to save friction on each somite which is used to tell them to an external controller
+/// gripping_forces                             Vec of force object to save gripping force on each somite which is used to tell them to an external controller
 /// target_angles                               HashMap of somite ids where actuators are attached and its bending angle. Used to specify default angles.
 /// realtime_tunable_torsion_spring_tensions                     Vec of tension values applied on actuators
 /// gripping_thresholds                         HashMap of gripper somite ids and their gripping thresholds
 /// previous_vertical_torsion_spring_angles     
+/// gravity_angle                               f64 to save gravity direction. 0 corresponds to locomotion on flat plain, 0~pi means climbing, pi means upside-down, pi~2pi means descending. default to 0
 /// dynamics                                    struct that defines mechanical dynamics
 /// 
 /// # Methods
@@ -71,9 +73,13 @@ py_module_initializer!(caterpillar, initcaterpillar, PyInit_caterpillar, |py, m|
 /// step_with_feedbacks(&self, dt: f64, feedbacks_somites: PyTuple, feedbacks_grippers: PyTuple) -> PyResult<PyObject> 
 /// step_with_target_angles(&self, dt: f64, somite_target_angles: PyTuple, gripper_target_angles: PyTuple) -> PyResult<PyObject> 
 /// frictions_x(&self) -> PyResult<PyTuple> 
+/// gripping_force_x(&self) -> PyResult<PyTuple> 
+/// gripping_force_z(&self) -> PyResult<PyTuple> 
 /// tensions(&self) -> PyResult<PyTuple> 
 /// somite_phases(&self) -> PyResult<PyTuple> 
 /// gripper_phases(&self) -> PyResult<PyTuple> 
+/// set_gravity_angle(&self, new_angle: f64) -> PyResult<PyObject>
+/// is_on_ground(&self) -> PyResult<bool>
 py_class!(class Caterpillar |py| {
     data config: caterpillar_config::Config;
     data somites: Vec<somite::Somite>;
@@ -85,11 +91,13 @@ py_class!(class Caterpillar |py| {
     data gripping_oscillators: collections::HashMap<usize, cell::RefCell<phase_oscillator::PhaseOscillator>>;
     data gripping_oscillator_ids: Vec<usize>;
     data oscillation_ranges: collections::HashMap<usize, cell::Cell<f64>>;
-    data frictional_forces: Vec<cell::Cell<f64>>;
+    data frictional_forces: Vec<cell::Cell<Coordinate>>;
+    data gripping_forces: Vec<cell::Cell<Coordinate>>;
     data target_angles: cell::RefCell<collections::HashMap<usize, f64>>;
     data realtime_tunable_torsion_spring_tensions: Vec<cell::Cell<f64>>;
     data gripping_thresholds: collections::HashMap<usize, cell::Cell<f64>>;
     data previous_vertical_torsion_spring_angles: collections::HashMap<usize, cell::Cell<f64>>;
+    data gravity_angle: cell::Cell<f64>;
     data dynamics: Dynamics;
     def __new__(
         _cls,
@@ -177,10 +185,11 @@ py_class!(class Caterpillar |py| {
         //   value: region of motion of actuator, i.e., max bending angle
         let mut oscillation_ranges = collections::HashMap::<usize, cell::Cell<f64>>::new();
         for somite_id in &oscillator_ids {
-            oscillation_ranges.insert(*somite_id, cell::Cell::<f64>::new(config.realtime_tunable_ts_rom));
+            oscillation_ranges.insert(*somite_id, cell::Cell::<f64>::new(config.realtime_tunable_ts_rom_min));
         }
 
-        let initial_frictions = (0..somite_number).map(|_| {cell::Cell::new(0.)}).collect();
+        let initial_frictions = (0..somite_number).map(|_| {cell::Cell::new(Coordinate::zero())}).collect();
+        let initial_gripping_force = (0..somite_number).map(|_| {cell::Cell::new(Coordinate::zero())}).collect();
         let target_angles = cell::RefCell::<collections::HashMap<usize, f64>>::new(collections::HashMap::<usize, f64>::new());
         let tensions = (0..somite_number-2).map(|_| {cell::Cell::<f64>::new(0.)}).collect::<Vec<cell::Cell<f64>>>(); // used to save and give it to an external controller
 
@@ -212,10 +221,12 @@ py_class!(class Caterpillar |py| {
             gripping_oscillator_ids,
             oscillation_ranges,
             initial_frictions,
+            initial_gripping_force,
             target_angles,
             tensions,
             gripping_thresholds,
             previous_vertical_torsion_spring_angles,
+            cell::Cell::new(0.0),
             dy,
         )
     }
@@ -310,6 +321,7 @@ py_class!(class Caterpillar |py| {
         if feedbacks_grippers.len(py) != self.gripping_oscillators(py).len() {
             panic!("number of elements in feedbacks_grippers and oscillator controllers for grippers are inconsistent");
         }
+        // update phase oscillators for somite actuators
         for (i, f) in feedbacks_somites.iter(py).enumerate() {
             self.oscillators(py)
                 .get(&self.order2somite_oscillator_id(py, i))
@@ -317,6 +329,7 @@ py_class!(class Caterpillar |py| {
                 .borrow_mut()
                 .step(self.config(py).normal_angular_velocity + f.extract::<f64>(py).unwrap(), dt);
         }
+        // update phase oscillators for grippers
         for (i, f) in feedbacks_grippers.iter(py).enumerate() {
             self.gripping_oscillators(py)
             .get(&self.order2gripping_oscillator_id(py, i))
@@ -351,9 +364,23 @@ py_class!(class Caterpillar |py| {
         Ok(
             PyTuple::new(
                 py,
-                self.frictional_forces(py).iter().map(|f| {
-                    f.get().into_py_object(py).into_object()
-                }).collect::<Vec<PyObject>>().as_slice()
+                self.frictional_forces(py).iter().map(|f| {f.get().x.into_py_object(py).into_object()}).collect::<Vec<PyObject>>().as_slice()
+            )
+        )
+    }
+    def gripping_force_x(&self) -> PyResult<PyTuple> {
+        Ok(
+            PyTuple::new(
+                py,
+                self.gripping_forces(py).iter().map(|f| {f.get().x.into_py_object(py).into_object()}).collect::<Vec<PyObject>>().as_slice()
+            )
+        )
+    }
+    def gripping_force_z(&self) -> PyResult<PyTuple> {
+        Ok(
+            PyTuple::new(
+                py,
+                self.gripping_forces(py).iter().map(|f| {f.get().z.into_py_object(py).into_object()}).collect::<Vec<PyObject>>().as_slice()
             )
         )
     }
@@ -390,6 +417,18 @@ py_class!(class Caterpillar |py| {
             )
         )
     }
+    def set_gravity_angle(&self, new_angle: f64) -> PyResult<PyObject>{
+        self.gravity_angle(py).set(new_angle);
+        Ok(py.None())
+    }
+    def is_on_ground(&self) -> PyResult<bool> {
+        Ok(self.somites(py).iter().fold(false, |acc, ref s| acc || s.is_on_ground()))
+    }
+    def set_gripper_phase(&self, somite_id: i64, phase: f64) -> PyResult<PyObject> {
+        // set phase of gripper oscillator on soimte designated by somite_id
+        self.gripping_oscillators(py).get(&(somite_id as usize)).unwrap().borrow_mut().set_phase(phase);
+        Ok(py.None())
+    }
 });
 
 /// Implementation of Caterpillar simulator.
@@ -419,6 +458,7 @@ impl Caterpillar {
         self.update_somite_verocities(py, time_delta, &new_forces);
         self.update_somite_forces(py, &new_forces);
 
+        // save simulation result
         let decimation_span = 10_usize;
         if self.frame_count(py).get() % decimation_span == 0_usize {
             // save the step into simulation protocol
@@ -519,7 +559,8 @@ impl Caterpillar {
                         Some(oscillator) => {
                             let target_angle = phase2torsion_spring_target_angle(
                                 oscillator.borrow().get_phase(),
-                                self.oscillation_ranges(py).get(&i).unwrap().get(),
+                                self.config(py).realtime_tunable_ts_rom_min,
+                                self.config(py).realtime_tunable_ts_rom_max,
                             );
                             target_angle - current_angle
                         }
@@ -564,7 +605,8 @@ impl Caterpillar {
 
     fn add_gravitational_forces(&self, py: Python, mut forces: Vec<Coordinate>) -> Vec<Coordinate> {
         for (i, s) in self.somites(py).iter().enumerate() {
-            forces[i].z += -GRAVITATIONAL_ACCELERATION * s.mass
+            forces[i].z += -GRAVITATIONAL_ACCELERATION * s.mass * self.gravity_angle(py).get().cos();
+            forces[i].x += -GRAVITATIONAL_ACCELERATION * s.mass * self.gravity_angle(py).get().sin();
         }
         forces
     }
@@ -733,17 +775,20 @@ impl Caterpillar {
         }
     }
 
+    /// add shear force, i.e., force long to x axis, and force along z axis caused by gripper
     fn add_gripping_forces(&self, py: Python, mut forces: Vec<Coordinate>) -> Vec<Coordinate> {
         for (i, s) in self.somites(py).iter().enumerate() {
-            let has_leg = match self.gripping_oscillators(py).get(&i) {
-                Some(_) => true,
-                None => false,
-            };
-            let shear_force =
-                self.dynamics(py)
-                    .calculate_somite_shear_force(&s, &forces[i], has_leg);
-            self.frictional_forces(py)[i].set(shear_force.x);
-            forces[i] += shear_force;
+            if let Some(_) = s.get_gripping_point() { // grip point being set means the somite has a leg
+                let gripping_force = self.dynamics(py).calculate_gripping_force(&s, &forces[i]);
+                forces[i] += gripping_force;
+                self.gripping_forces(py)[i].set(gripping_force); // for external reference
+                self.frictional_forces(py)[i].set(Coordinate::zero()); // for external reference
+            } else if s.is_on_ground() {
+                let friction = self.dynamics(py).calculate_friction(&s, &forces[i]);
+                forces[i] += friction;
+                self.gripping_forces(py)[i].set(Coordinate::zero()); // for external reference
+                self.frictional_forces(py)[i].set(friction); // for external reference
+            }
         }
         forces
     }
@@ -757,6 +802,6 @@ impl Caterpillar {
     }
 }
 
-fn phase2torsion_spring_target_angle(phase: f64, range: f64) -> f64 {
-    range * (1. - phase.cos()) * 0.5
+fn phase2torsion_spring_target_angle(phase: f64, range_min: f64, range_max: f64) -> f64 {
+    (range_max - range_min) * (1. - phase.cos()) * 0.5 + range_min
 }
