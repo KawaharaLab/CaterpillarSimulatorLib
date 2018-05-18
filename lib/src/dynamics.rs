@@ -29,6 +29,8 @@ pub struct Dynamics {
     pub grip_phase_threshold: f64,
 }
 
+const EPSILON: f64 = 10e-5;
+
 impl Dynamics {
     /// Calculate shear force caused by friction between a somite and the substrate.
     pub fn calculate_friction(&self, somite: &Somite, applied_force: &Coordinate) -> Coordinate {
@@ -65,6 +67,10 @@ impl Dynamics {
         }
     }
 
+    pub fn is_blocked_by_obstacle(&self, somite: &Somite, path_height: &PathHeights) -> bool {
+        somite.get_position().z < somite.radius + path_height.get_height(somite.get_position().x) - EPSILON
+    }
+
     pub fn should_grip(&self, somite: &Somite, oscillator: Ref<PhaseOscillator>, path_heights: &PathHeights) -> bool {
         if oscillator.get_phase().sin() < self.grip_phase_threshold && path_heights.is_on_ground(somite)
             && !somite.is_gripping()
@@ -92,6 +98,30 @@ mod test {
     use coordinate::Coordinate;
     use somite::Somite;
     use phase_oscillator::PhaseOscillator;
+
+    #[test]
+    fn test_is_blocked_by_obstacle() {
+        let d = Dynamics {..Default::default()};
+        let s = Somite::new(
+            1.,
+            1.,
+            Coordinate::new(0.4, 0., 1.),
+            Coordinate::zero(),
+        );
+        let mut path_heights = PathHeights::new();
+        path_heights.set(0.5, 0.7).unwrap();
+        
+        // not blocked
+        assert!(!d.is_blocked_by_obstacle(&s, &path_heights));
+
+        // blocked
+        s.set_position(Coordinate::new(0.51, 0., 1.));
+        assert!(d.is_blocked_by_obstacle(&s, &path_heights));
+
+        // not blocked
+        s.set_position(Coordinate::new(0.51, 0., 1.7));
+        assert!(!d.is_blocked_by_obstacle(&s, &path_heights));
+    }
 
     #[test]
     fn test_calculate_gripping_force() {
@@ -188,7 +218,7 @@ mod test {
         assert!(
             !d.should_grip(&s, o.borrow(), &PathHeights::new()),
             "in the air & out of grip range"
-        );
+        ); 
 
         o.borrow_mut().set_phase(3. / 2. * f64::consts::PI);
         assert!(

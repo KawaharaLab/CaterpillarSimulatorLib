@@ -505,8 +505,11 @@ impl Caterpillar {
         // update somite positions based on Velret's method
         // x_{t+1} = x_{t} + \delta t v_{t} + 0.5 \delta t^2 f_{t, x_t}
         for s in self.somites(py) {
-            let new_position = s.get_position() + s.get_verocity() * time_delta
+            let mut new_position = s.get_position() + s.get_verocity() * time_delta
                 + s.get_force() * 0.5 * time_delta.powi(2) / s.mass;
+            if self.dynamics(py).is_blocked_by_obstacle(s, self.path_heights(py)) {
+                new_position.x = s.get_position().x.min(new_position.x); // if blocked, cancel the forward move
+            }
             s.set_position(new_position);
         }
     }
@@ -515,8 +518,7 @@ impl Caterpillar {
         // update somite verocities based on Velret's method
         // v_{t+1} = v_{t} +  \delta \frac{t (f_{t, x_t} + f_{t+1, x_{t+1}})}{2}
         for (i, s) in self.somites(py).iter().enumerate() {
-            let mut new_verocity =
-                s.get_verocity() + (s.get_force() + new_forces[i]) * 0.5 * time_delta / s.mass;
+            let mut new_verocity = s.get_verocity() + (s.get_force() + new_forces[i]) * 0.5 * time_delta / s.mass;
             if self.path_heights(py).is_on_ground(s) {
                 new_verocity.z = new_verocity.z.max(0.);
             }
@@ -609,12 +611,13 @@ impl Caterpillar {
         self.update_grippers(py);
         new_forces = self.add_gripping_forces(py, new_forces);
 
+        // if a somite is on the ground, z-axis negative force is canceled
         self.mask_force_on_landing(py, new_forces)
     }
 
+    /// mask negative z force if a somite is on ground
+    /// this process should be the very end of resultant force calculation
     fn mask_force_on_landing(&self, py: Python, mut forces: Vec<Coordinate>) -> Vec<Coordinate> {
-        // mask negative z force if a somite is on ground
-        // this process should be the very end of resultant force calculation
         for (i, s) in self.somites(py).iter().enumerate() {
             if self.path_heights(py).is_on_ground(s) {
                 forces[i].z = forces[i].z.max(0.)

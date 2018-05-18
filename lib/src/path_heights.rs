@@ -38,4 +38,16 @@ impl PathHeights {
         }
         s.is_on_ground(*self.heights.last().unwrap()) // at least, 0 is set
     }
+
+    pub fn get_height(&self, x: f64) -> f64 {
+        if x < *self.start_points.first().unwrap() {
+            return *self.heights.first().unwrap();
+        }
+        for (i, start_point) in self.start_points.iter().enumerate() {
+            if *start_point > x {
+                return self.heights[i-1];
+            }
+        }
+        *self.heights.last().unwrap()
+    }
 }   
