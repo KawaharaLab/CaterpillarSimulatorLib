@@ -90,8 +90,8 @@ impl Somite {
         unsafe { *self.verocity.as_ptr() }.y.signum()
     }
 
-    pub fn is_on_ground(&self) -> bool {
-        self.position.get().z <= self.radius
+    pub fn is_on_ground(&self, ground_height: f64) -> bool {
+        self.position.get().z <= self.radius + ground_height
     }
 
     pub fn is_moving_x(&self) -> bool {
@@ -121,6 +121,8 @@ impl Somite {
         self.gripping_flag.set(false);
     }
 
+    /// Returns neutral point when gripping the substrate.
+    /// None is returned if not gripping
     pub fn get_gripping_point(&self) -> Option<cell::Ref<coordinate::Coordinate>> {
         if self.gripping_flag.get() {
             Some(self.gripping_point.borrow())

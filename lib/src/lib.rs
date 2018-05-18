@@ -19,9 +19,11 @@ mod coordinate;
 mod simulation_export;
 mod calculations;
 mod dynamics;
+mod path_heights;
 
 use coordinate::Coordinate;
 use dynamics::Dynamics;
+use path_heights::PathHeights;
 
 const GRAVITATIONAL_ACCELERATION: f64 = 9.8065;
 
@@ -56,6 +58,7 @@ py_module_initializer!(caterpillar, initcaterpillar, PyInit_caterpillar, |py, m|
 /// previous_vertical_torsion_spring_angles     
 /// gravity_angle                               f64 to save gravity direction. 0 corresponds to locomotion on flat plain, 0~pi means climbing, pi means upside-down, pi~2pi means descending. default to 0
 /// dynamics                                    struct that defines mechanical dynamics
+/// path_heights                                holds height of each section in a path
 /// 
 /// # Methods
 /// print_config(&self) -> PyResult<PyString>
@@ -99,17 +102,25 @@ py_class!(class Caterpillar |py| {
     data previous_vertical_torsion_spring_angles: collections::HashMap<usize, cell::Cell<f64>>;
     data gravity_angle: cell::Cell<f64>;
     data dynamics: Dynamics;
+    data path_heights: PathHeights;
     def __new__(
         _cls,
         somite_number: usize,
         somites_to_set_oscillater: &PyTuple,
         somites_to_set_gripper: &PyTuple,
-        kwargs: Option<&PyDict>
+        kwargs: Option<&PyDict>,
+        heights:  Option<&PyDict>
     ) -> PyResult<Caterpillar> {
         // parse config
         let config = match kwargs {
             Some(kwargs) => Self::parse_config(py, kwargs),
             None => caterpillar_config::Config::new(),
+        };
+
+        // parse path heights info
+        let path_heights = match heights {
+            Some(heights) => Self::parse_path_heights(py, heights),
+            None => PathHeights::new(),
         };
 
         // create a vect of somites objects
@@ -228,6 +239,7 @@ py_class!(class Caterpillar |py| {
             previous_vertical_torsion_spring_angles,
             cell::Cell::new(0.0),
             dy,
+            path_heights,
         )
     }
     def print_config(&self) -> PyResult<PyString> {
@@ -422,7 +434,7 @@ py_class!(class Caterpillar |py| {
         Ok(py.None())
     }
     def is_on_ground(&self) -> PyResult<bool> {
-        Ok(self.somites(py).iter().fold(false, |acc, ref s| acc || s.is_on_ground()))
+        Ok(self.somites(py).iter().fold(false, |acc, ref s| acc ||  self.path_heights(py).is_on_ground(s)))
     }
     def set_gripper_phase(&self, somite_id: i64, phase: f64) -> PyResult<PyObject> {
         // set phase of gripper oscillator on soimte designated by somite_id
@@ -442,6 +454,14 @@ impl Caterpillar {
             );
         }
         config
+    }
+
+    fn parse_path_heights(py: Python, heights: &PyDict) -> PathHeights {
+        let mut path_heights = PathHeights::new();
+        for (start_point, height) in heights.items(py) {
+            path_heights.set(start_point.extract::<f64>(py).unwrap(), height.extract::<f64>(py).unwrap()).unwrap();
+        }
+        path_heights
     }
 
     fn calculate_center_of_mass(&self, py: Python) -> Coordinate {
@@ -497,7 +517,7 @@ impl Caterpillar {
         for (i, s) in self.somites(py).iter().enumerate() {
             let mut new_verocity =
                 s.get_verocity() + (s.get_force() + new_forces[i]) * 0.5 * time_delta / s.mass;
-            if s.is_on_ground() {
+            if self.path_heights(py).is_on_ground(s) {
                 new_verocity.z = new_verocity.z.max(0.);
             }
             s.set_verocity(new_verocity);
@@ -596,7 +616,7 @@ impl Caterpillar {
         // mask negative z force if a somite is on ground
         // this process should be the very end of resultant force calculation
         for (i, s) in self.somites(py).iter().enumerate() {
-            if s.is_on_ground() {
+            if self.path_heights(py).is_on_ground(s) {
                 forces[i].z = forces[i].z.max(0.)
             }
         }
@@ -766,7 +786,7 @@ impl Caterpillar {
         for (i, s) in self.somites(py).iter().enumerate() {
             if let Some(oscillator) = self.gripping_oscillators(py).get(&i) {
                 // update grip state
-                if self.dynamics(py).should_grip(&s, oscillator.borrow()) {
+                if self.dynamics(py).should_grip(&s, oscillator.borrow(), self.path_heights(py)) {
                     s.grip();
                 } else if self.dynamics(py).should_release(&s, oscillator.borrow()) {
                     s.release();
@@ -783,7 +803,7 @@ impl Caterpillar {
                 forces[i] += gripping_force;
                 self.gripping_forces(py)[i].set(gripping_force); // for external reference
                 self.frictional_forces(py)[i].set(Coordinate::zero()); // for external reference
-            } else if s.is_on_ground() {
+            } else if self.path_heights(py).is_on_ground(s) {
                 let friction = self.dynamics(py).calculate_friction(&s, &forces[i]);
                 forces[i] += friction;
                 self.gripping_forces(py)[i].set(Coordinate::zero()); // for external reference

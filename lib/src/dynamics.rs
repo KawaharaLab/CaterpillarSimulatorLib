@@ -2,6 +2,7 @@ use std::cell::Ref;
 use coordinate::Coordinate;
 use somite::Somite;
 use phase_oscillator::PhaseOscillator;
+use path_heights::PathHeights;
 
 /// Dynamics defines mechanical dynamics of a system
 /// 
@@ -64,8 +65,8 @@ impl Dynamics {
         }
     }
 
-    pub fn should_grip(&self, somite: &Somite, oscillator: Ref<PhaseOscillator>) -> bool {
-        if oscillator.get_phase().sin() < self.grip_phase_threshold && somite.is_on_ground()
+    pub fn should_grip(&self, somite: &Somite, oscillator: Ref<PhaseOscillator>, path_heights: &PathHeights) -> bool {
+        if oscillator.get_phase().sin() < self.grip_phase_threshold && path_heights.is_on_ground(somite)
             && !somite.is_gripping()
         {
             true
@@ -185,33 +186,33 @@ mod test {
         s.set_position(Coordinate::new(0., 0., 1.1));
         o.borrow_mut().set_phase(f64::consts::PI);
         assert!(
-            !d.should_grip(&s, o.borrow()),
+            !d.should_grip(&s, o.borrow(), &PathHeights::new()),
             "in the air & out of grip range"
         );
 
         o.borrow_mut().set_phase(3. / 2. * f64::consts::PI);
         assert!(
-            !d.should_grip(&s, o.borrow()),
+            !d.should_grip(&s, o.borrow(), &PathHeights::new()),
             "in the air & in the grip range"
         );
 
         s.set_position(Coordinate::new(0., 0., 1.));
         o.borrow_mut().set_phase(f64::consts::PI);
         assert!(
-            !d.should_grip(&s, o.borrow()),
+            !d.should_grip(&s, o.borrow(), &PathHeights::new()),
             "on the ground & out of grip range"
         );
 
         o.borrow_mut().set_phase(3. / 2. * f64::consts::PI);
         s.grip();
         assert!(
-            !d.should_grip(&s, o.borrow()),
+            !d.should_grip(&s, o.borrow(), &PathHeights::new()),
             "on the ground & in the grip range & gripping"
         );
 
         s.release();
         assert!(
-            d.should_grip(&s, o.borrow()),
+            d.should_grip(&s, o.borrow(), &PathHeights::new()),
             "on the ground & in the grip range & not gripping"
         );
     }
