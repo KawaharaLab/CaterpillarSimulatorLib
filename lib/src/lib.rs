@@ -8,6 +8,7 @@ use std::f64;
 use std::cell;
 use std::collections;
 use cpython::{PyDict, PyObject, PyResult, PyString, PyTuple, Python, PythonObject, ToPyObject};
+use std::io::{self, Write};
 
 mod phase_oscillator;
 mod somite;
@@ -83,6 +84,7 @@ py_module_initializer!(caterpillar, initcaterpillar, PyInit_caterpillar, |py, m|
 /// gripper_phases(&self) -> PyResult<PyTuple> 
 /// set_gravity_angle(&self, new_angle: f64) -> PyResult<PyObject>
 /// is_on_ground(&self) -> PyResult<bool>
+/// is_head_blocked(&self) -> PyResult<bool>
 py_class!(class Caterpillar |py| {
     data config: caterpillar_config::Config;
     data somites: Vec<somite::Somite>;
@@ -441,6 +443,10 @@ py_class!(class Caterpillar |py| {
         self.gripping_oscillators(py).get(&(somite_id as usize)).unwrap().borrow_mut().set_phase(phase);
         Ok(py.None())
     }
+    def is_head_blocked(&self) -> PyResult<bool> {
+        // return true if head is blocked by an obstacle and cannot move forward anymore
+        Ok(self.dynamics(py).is_blocked_by_obstacle(self.somites(py).last().unwrap(), self.path_heights(py)))
+    }
 });
 
 /// Implementation of Caterpillar simulator.
@@ -575,19 +581,17 @@ impl Caterpillar {
                     self.somites(py)[i].get_position(),
                     self.somites(py)[i + 1].get_position(),
                 );
-                match self.target_angles(py).borrow_mut().remove(&i) {
-                    Some(target_angle) => (target_angle - current_angle).max(0.),
-                    None => match self.oscillators(py).get(&i) {
-                        Some(oscillator) => {
-                            let target_angle = phase2torsion_spring_target_angle(
-                                oscillator.borrow().get_phase(),
-                                self.config(py).realtime_tunable_ts_rom_min,
-                                self.config(py).realtime_tunable_ts_rom_max,
-                            );
-                            target_angle - current_angle
-                        }
-                        None => 0.,
-                    },
+                match self.oscillators(py).get(&i) {
+                    Some(oscillator) => {
+                        let target_angle = phase2torsion_spring_target_angle(
+                            oscillator.borrow().get_phase(),
+                            self.config(py).realtime_tunable_ts_rom_min,
+                            self.config(py).realtime_tunable_ts_rom_max,
+                        );
+                        // io::stdout().write(format!("target angle: {}  angel diff: {}\n", target_angle, target_angle - current_angle).as_bytes()).unwrap();
+                        target_angle - current_angle
+                    }
+                    None => 0.,
                 }
             })
             .collect::<Vec<f64>>();
@@ -600,7 +604,7 @@ impl Caterpillar {
         for (i, tension) in realtime_tunable_torsion_spring_tensions.into_iter().enumerate() {
             self.realtime_tunable_torsion_spring_tensions(py)[i].set(tension);
         }
-        // add force comming from actuators
+        // add force coming from actuators
         new_forces = self.add_realtime_tunable_torsion_spring_forces(
             py,
             vertical_realtime_tunable_ts,

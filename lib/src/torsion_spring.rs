@@ -59,34 +59,34 @@ impl TorsionSpring {
         }
     }
 
+    /// Calculate torsion force applied on tip and base, so that discrepancy_angle become zero.
+    /// discrepancy_angle is angle from actual position to target position.
+    /// Force applied on tip and base is or symmetric.
+    /// Base and tip are not symmetric, i.e. if you swap base and tip you should modify target_angular to (2*PI - original_target_angle).
+    /// range of target_angle is [0, 2*PI], if it exceeds target_angle % 2*PI will be used.
     pub fn force_on_discrepancy(
         &self,
         base: coordinate::Coordinate,
         center: coordinate::Coordinate,
         tip: coordinate::Coordinate,
-        discrepancy_angle_angle: f64,
+        discrepancy_angle: f64,
     ) -> (coordinate::Coordinate, coordinate::Coordinate) {
-        // calculate torsion force applied on tip and base, so that discrepancy_angle_angle becomse zero.
-        // discrepancy_angle is angle from actual position to target position.
-        // force applied on tip and base is or symmetrical.
-        // base and tip are not symmetric, i.e. if you swap base and tip you should modify target_angular to (2*PI - original_target_angle).
-        // range of target_angle is [0, 2*PI], if it exceeds target_angle % 2*PI will be used.
         let vec_bc = center - base;
         let vec_ct = tip - center;
-        if discrepancy_angle_angle < EPSILON {
-            // take into account numeric error
-            (
-                coordinate::Coordinate::zero(),
-                coordinate::Coordinate::zero(),
-            )
-        } else {
-            (
-                self.normal_vector(vec_ct) * self.calculate_spring_constant(discrepancy_angle_angle)
-                    * discrepancy_angle_angle, // no minus since discrepancy_angle is from actual to target position
-                self.normal_vector(vec_bc) * self.calculate_spring_constant(discrepancy_angle_angle)
-                    * discrepancy_angle_angle,
-            )
-        }
+        // if discrepancy_angle < EPSILON { // take into account numeric error
+        //     (coordinate::Coordinate::zero(), coordinate::Coordinate::zero())
+        // } else {
+        //     (
+        //         self.normal_vector(vec_ct) * self.calculate_spring_constant(discrepancy_angle)
+        //             * discrepancy_angle, // no minus since discrepancy_angle is from actual to target position
+        //         self.normal_vector(vec_bc) * self.calculate_spring_constant(discrepancy_angle)
+        //             * discrepancy_angle,
+        //     )
+        // }
+        (
+            self.normal_vector(vec_ct) * self.calculate_spring_constant(discrepancy_angle) * discrepancy_angle,
+            self.normal_vector(vec_bc) * self.calculate_spring_constant(discrepancy_angle) * discrepancy_angle,
+        )
     }
 
     pub fn current_angle(
