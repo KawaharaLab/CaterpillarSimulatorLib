@@ -17,6 +17,7 @@ pub struct Object {
 pub struct ObjectPosition {
     pub id: String,
     pub pos: (f64, f64, f64),
+    pub gripping: bool,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -69,14 +70,17 @@ mod tests {
                 ObjectPosition {
                     id: "s0".to_string(),
                     pos: (0., 0., 0.),
+                    gripping: true,
                 },
                 ObjectPosition {
                     id: "s1".to_string(),
                     pos: (1., 0., 0.),
+                    gripping: true,
                 },
                 ObjectPosition {
                     id: "s2".to_string(),
                     pos: (2., 0., 0.),
+                    gripping: true,
                 },
             ],
         );
@@ -86,10 +90,12 @@ mod tests {
                 ObjectPosition {
                     id: "s1".to_string(),
                     pos: (0., 3., 0.),
+                    gripping: true,
                 },
                 ObjectPosition {
                     id: "s2".to_string(),
                     pos: (0., 4., 0.),
+                    gripping: true,
                 },
             ],
         );
@@ -119,6 +125,7 @@ mod tests {
                 ObjectPosition {
                     id: "s0".to_string(),
                     pos: (0., 0., 0.),
+                    gripping: true,
                 },
             ],
         );
@@ -128,6 +135,7 @@ mod tests {
                 ObjectPosition {
                     id: "s0".to_string(),
                     pos: (0., 3., 0.),
+                    gripping: true,
                 },
             ],
         );
@@ -146,6 +154,7 @@ mod tests {
                 ObjectPosition {
                     id: "s0".to_string(),
                     pos: (0., 0., 0.),
+                    gripping: true,
                 },
             ],
         );
@@ -155,6 +164,7 @@ mod tests {
                 ObjectPosition {
                     id: "s0".to_string(),
                     pos: (0., 3., 0.),
+                    gripping: true,
                 },
             ],
         );
@@ -183,10 +193,12 @@ mod tests {
                 ObjectPosition {
                     id: "s0".to_string(),
                     pos: (1., 0., 0.),
+                    gripping: true,
                 },
                 ObjectPosition {
                     id: "s1".to_string(),
                     pos: (2., 0., 0.),
+                    gripping: true,
                 },
             ],
         );
@@ -196,10 +208,12 @@ mod tests {
                 ObjectPosition {
                     id: "s0".to_string(),
                     pos: (2., 1., 0.),
+                    gripping: true,
                 },
                 ObjectPosition {
                     id: "s1".to_string(),
                     pos: (3., 2., 0.),
+                    gripping: true,
                 },
             ],
         );
@@ -217,15 +231,15 @@ mod tests {
             "{\
                 \"objects\":[{\"id\":\"s0\",\"rad\":2.0,\"pos\":[0.0,0.0,0.0]},{\"id\":\"s1\",\"rad\":3.0,\"pos\":[1.0,0.0,0.0]}],\
                 \"frames\":{\
-                    \"0\":[{\"id\":\"s0\",\"pos\":[1.0,0.0,0.0]},{\"id\":\"s1\",\"pos\":[2.0,0.0,0.0]}],\
-                    \"1\":[{\"id\":\"s0\",\"pos\":[2.0,1.0,0.0]},{\"id\":\"s1\",\"pos\":[3.0,2.0,0.0]}]\
+                    \"0\":[{\"id\":\"s0\",\"pos\":[1.0,0.0,0.0],\"gripping\":true},{\"id\":\"s1\",\"pos\":[2.0,0.0,0.0],\"gripping\":true}],\
+                    \"1\":[{\"id\":\"s0\",\"pos\":[2.0,1.0,0.0],\"gripping\":true},{\"id\":\"s1\",\"pos\":[3.0,2.0,0.0],\"gripping\":true}]\
                 }\
             }",
             "{\
                 \"objects\":[{\"id\":\"s0\",\"rad\":2.0,\"pos\":[0.0,0.0,0.0]},{\"id\":\"s1\",\"rad\":3.0,\"pos\":[1.0,0.0,0.0]}],\
                 \"frames\":{\
-                    \"1\":[{\"id\":\"s0\",\"pos\":[2.0,1.0,0.0]},{\"id\":\"s1\",\"pos\":[3.0,2.0,0.0]}],\
-                    \"0\":[{\"id\":\"s0\",\"pos\":[1.0,0.0,0.0]},{\"id\":\"s1\",\"pos\":[2.0,0.0,0.0]}]\
+                    \"1\":[{\"id\":\"s0\",\"pos\":[2.0,1.0,0.0],\"gripping\":true},{\"id\":\"s1\",\"pos\":[3.0,2.0,0.0],\"gripping\":true}],\
+                    \"0\":[{\"id\":\"s0\",\"pos\":[1.0,0.0,0.0],\"gripping\":true},{\"id\":\"s1\",\"pos\":[2.0,0.0,0.0],\"gripping\":true}]\
                 }\
             }",
             ];

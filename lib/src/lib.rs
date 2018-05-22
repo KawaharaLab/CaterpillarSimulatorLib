@@ -8,7 +8,6 @@ use std::f64;
 use std::cell;
 use std::collections;
 use cpython::{PyDict, PyObject, PyResult, PyString, PyTuple, Python, PythonObject, ToPyObject};
-use std::io::{self, Write};
 
 mod phase_oscillator;
 mod somite;
@@ -503,6 +502,7 @@ impl Caterpillar {
             .map(|(i, s)| simulation_export::ObjectPosition {
                 id: format!("_somite_{}", i),
                 pos: s.get_position().to_tuple(),
+                gripping: s.is_gripping(),
             })
             .collect()
     }
