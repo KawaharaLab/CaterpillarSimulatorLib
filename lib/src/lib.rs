@@ -74,6 +74,7 @@ py_module_initializer!(caterpillar, initcaterpillar, PyInit_caterpillar, |py, m|
 /// set_target_angle(&self, target_somite_oscillartor: usize, target_angle: f64) -> PyResult<PyObject> 
 /// step(&self, dt: f64) -> PyResult<PyObject> 
 /// step_with_feedbacks(&self, dt: f64, feedbacks_somites: PyTuple, feedbacks_grippers: PyTuple) -> PyResult<PyObject> 
+/// steps_with_feedbacks(&self, dt: f64, steps: u8, feedbacks_somites: PyTuple, feedbacks_grippers: PyTuple) -> PyResult<PyObject>
 /// step_with_target_angles(&self, dt: f64, somite_target_angles: PyTuple, gripper_target_angles: PyTuple) -> PyResult<PyObject> 
 /// frictions_x(&self) -> PyResult<PyTuple> 
 /// gripping_force_x(&self) -> PyResult<PyTuple> 
@@ -351,6 +352,35 @@ py_class!(class Caterpillar |py| {
             .step(self.config(py).normal_angular_velocity + f.extract::<f64>(py).unwrap(), dt);
         }
         self.update_state(py, dt);
+        Ok(py.None())
+    }
+    def steps_with_feedbacks(&self, dt: f64, steps: u8, feedbacks_somites: PyTuple, feedbacks_grippers: PyTuple) -> PyResult<PyObject> {
+        // run simulation for several steps of dt using fixed feedbacks
+        if feedbacks_somites.len(py) != self.oscillators(py).len() {
+            panic!("number of elements in feedbacks_somites and oscillator controllers for somites are inconsistent");
+        }
+        if feedbacks_grippers.len(py) != self.gripping_oscillators(py).len() {
+            panic!("number of elements in feedbacks_grippers and oscillator controllers for grippers are inconsistent");
+        }
+        
+        for i in 0..steps { // run for several steps
+            for (i, f) in feedbacks_somites.iter(py).enumerate() { // update phase oscillators for somite actuators
+                self.oscillators(py)
+                    .get(&self.order2somite_oscillator_id(py, i))
+                    .unwrap()
+                    .borrow_mut()
+                    .step(self.config(py).normal_angular_velocity + f.extract::<f64>(py).unwrap(), dt);
+            }
+            // update phase oscillators for grippers
+            for (i, f) in feedbacks_grippers.iter(py).enumerate() {
+                self.gripping_oscillators(py)
+                .get(&self.order2gripping_oscillator_id(py, i))
+                .unwrap()
+                .borrow_mut()
+                .step(self.config(py).normal_angular_velocity + f.extract::<f64>(py).unwrap(), dt);
+            }
+            self.update_state(py, dt);
+        }
         Ok(py.None())
     }
     def step_with_target_angles(&self, dt: f64, somite_target_angles: PyTuple, gripper_target_angles: PyTuple) -> PyResult<PyObject> {
