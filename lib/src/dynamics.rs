@@ -30,6 +30,7 @@ pub struct Dynamics {
 }
 
 const EPSILON: f64 = 10e-5;
+const STUCKED_EPSILON: f64 = 10e-4;
 
 impl Dynamics {
     /// Calculate shear force caused by friction between a somite and the substrate.
