@@ -72,7 +72,7 @@ impl Dynamics {
     }
 
     pub fn should_grip(&self, somite: &Somite, oscillator: Ref<PhaseOscillator>, path_heights: &PathHeights) -> bool {
-        if oscillator.get_phase().sin() < self.grip_phase_threshold && path_heights.is_on_ground(somite)
+        if oscillator.get_phase().sin() < self.grip_phase_threshold && path_heights.is_on_ground(somite, self.is_blocked_by_obstacle(somite, path_heights))
             && !somite.is_gripping()
         {
             true

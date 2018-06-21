@@ -26,17 +26,25 @@ impl PathHeights {
     }
 
     /// is_on_ground returns true if a given object is on the ground, and false otherwise 
-    pub fn is_on_ground(&self, s: &Somite) -> bool {
+    pub fn is_on_ground(&self, s: &Somite, is_head_blocked: bool) -> bool {
         let x = &s.get_position().x;
         if x < self.start_points.first().unwrap() {
             return s.is_on_ground(*self.heights.first().unwrap());
         }
         for (i, start_point) in self.start_points.iter().enumerate() {
             if start_point > x  {
-                return s.is_on_ground(self.heights[i-1]); // the first start_point is 0, thus i>1
+                if is_head_blocked {
+                    return s.is_on_ground(self.heights[i-2]); // use the lower ground while being blocked
+                } else {
+                    return s.is_on_ground(self.heights[i-1]); // the first start_point is 0, thus i>1
+                }
             }
         }
-        s.is_on_ground(*self.heights.last().unwrap()) // at least, 0 is set
+        if is_head_blocked {
+            s.is_on_ground(*self.heights.get(self.heights.len()-2).unwrap()) // at least, 0 is set
+        } else {
+            s.is_on_ground(*self.heights.last().unwrap()) // at least, 0 is set
+        }
     }
 
     pub fn get_height(&self, x: f64) -> f64 {

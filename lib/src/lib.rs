@@ -363,7 +363,7 @@ py_class!(class Caterpillar |py| {
             panic!("number of elements in feedbacks_grippers and oscillator controllers for grippers are inconsistent");
         }
         
-        for i in 0..steps { // run for several steps
+        for _ in 0..steps { // run for several steps
             for (i, f) in feedbacks_somites.iter(py).enumerate() { // update phase oscillators for somite actuators
                 self.oscillators(py)
                     .get(&self.order2somite_oscillator_id(py, i))
@@ -465,7 +465,7 @@ py_class!(class Caterpillar |py| {
         Ok(py.None())
     }
     def is_on_ground(&self) -> PyResult<bool> {
-        Ok(self.somites(py).iter().fold(false, |acc, ref s| acc ||  self.path_heights(py).is_on_ground(s)))
+        Ok(self.somites(py).iter().fold(false, |acc, ref s| acc ||  self.path_heights(py).is_on_ground(s, self.dynamics(py).is_blocked_by_obstacle(s, self.path_heights(py)))))
     }
     def set_gripper_phase(&self, somite_id: i64, phase: f64) -> PyResult<PyObject> {
         // set phase of gripper oscillator on soimte designated by somite_id
@@ -555,7 +555,7 @@ impl Caterpillar {
         // v_{t+1} = v_{t} +  \delta \frac{t (f_{t, x_t} + f_{t+1, x_{t+1}})}{2}
         for (i, s) in self.somites(py).iter().enumerate() {
             let mut new_verocity = s.get_verocity() + (s.get_force() + new_forces[i]) * 0.5 * time_delta / s.mass;
-            if self.path_heights(py).is_on_ground(s) {
+            if self.path_heights(py).is_on_ground(s, self.dynamics(py).is_blocked_by_obstacle(s, self.path_heights(py))) {
                 new_verocity.z = new_verocity.z.max(0.);
             }
             s.set_verocity(new_verocity);
@@ -653,7 +653,7 @@ impl Caterpillar {
     /// this process should be the very end of resultant force calculation
     fn mask_force_on_landing(&self, py: Python, mut forces: Vec<Coordinate>) -> Vec<Coordinate> {
         for (i, s) in self.somites(py).iter().enumerate() {
-            if self.path_heights(py).is_on_ground(s) {
+            if self.path_heights(py).is_on_ground(s, self.dynamics(py).is_blocked_by_obstacle(s, self.path_heights(py))) {
                 forces[i].z = forces[i].z.max(0.)
             }
         }
@@ -840,7 +840,7 @@ impl Caterpillar {
                 forces[i] += gripping_force;
                 self.gripping_forces(py)[i].set(gripping_force); // for external reference
                 self.frictional_forces(py)[i].set(Coordinate::zero()); // for external reference
-            } else if self.path_heights(py).is_on_ground(s) {
+            } else if self.path_heights(py).is_on_ground(s, self.dynamics(py).is_blocked_by_obstacle(s, self.path_heights(py))) {
                 let friction = self.dynamics(py).calculate_friction(&s, &forces[i]);
                 forces[i] += friction;
                 self.gripping_forces(py)[i].set(Coordinate::zero()); // for external reference
