@@ -30,7 +30,7 @@ pub struct Dynamics {
 }
 
 const EPSILON: f64 = 10e-5;
-const STUCKED_EPSILON: f64 = 10e-3;
+const STUCK_EPSILON: f64 = 10e-3;
 
 impl Dynamics {
     /// Calculate shear force caused by friction between a somite and the substrate.
@@ -69,7 +69,7 @@ impl Dynamics {
     }
 
     pub fn is_blocked_by_obstacle(&self, somite: &Somite, path_height: &PathHeights) -> bool {
-        somite.get_position().z < somite.radius + path_height.get_height(somite.get_position().x) - EPSILON
+        somite.get_position().z < somite.radius + path_height.get_height(somite.get_position().x) - STUCK_EPSILON
     }
 
     pub fn should_grip(&self, somite: &Somite, oscillator: Ref<PhaseOscillator>, path_heights: &PathHeights) -> bool {
