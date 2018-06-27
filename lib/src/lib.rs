@@ -555,7 +555,9 @@ impl Caterpillar {
         // v_{t+1} = v_{t} +  \delta \frac{t (f_{t, x_t} + f_{t+1, x_{t+1}})}{2}
         for (i, s) in self.somites(py).iter().enumerate() {
             let mut new_verocity = s.get_verocity() + (s.get_force() + new_forces[i]) * 0.5 * time_delta / s.mass;
-            if self.path_heights(py).is_on_ground(s, self.dynamics(py).is_blocked_by_obstacle(s, self.path_heights(py))) {
+            if s.is_gripping() { // cannot move if gripping
+                new_verocity.z = 0.;
+            } else if self.path_heights(py).is_on_ground(s, self.dynamics(py).is_blocked_by_obstacle(s, self.path_heights(py))) {
                 new_verocity.z = new_verocity.z.max(0.);
             }
             s.set_verocity(new_verocity);
