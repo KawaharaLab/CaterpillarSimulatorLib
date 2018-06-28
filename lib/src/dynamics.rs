@@ -29,7 +29,7 @@ pub struct Dynamics {
     pub grip_phase_threshold: f64,
 }
 
-const EPSILON: f64 = 10e-5;
+// const EPSILON: f64 = 10e-5;
 const STUCK_EPSILON: f64 = 10e-3;
 
 impl Dynamics {

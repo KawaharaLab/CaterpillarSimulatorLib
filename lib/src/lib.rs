@@ -1,3 +1,5 @@
+#![recursion_limit="128"]
+
 #[macro_use]
 extern crate cpython;
 
@@ -105,6 +107,8 @@ py_class!(class Caterpillar |py| {
     data gravity_angle: cell::Cell<f64>;
     data dynamics: Dynamics;
     data path_heights: PathHeights;
+    data somite_distances: Vec<cell::Cell<f64>>;
+    data somite_angles: Vec<cell::Cell<f64>>;
     def __new__(
         _cls,
         somite_number: usize,
@@ -221,6 +225,10 @@ py_class!(class Caterpillar |py| {
             grip_phase_threshold: config.gripping_phase_threshold,
         };
 
+        // memory to save inter somite distances and angles
+        let somite_distances = vec![cell::Cell::<f64>::new(config.somite_radius); somite_number - 1];
+        let somite_angles = vec![cell::Cell::<f64>::new(0.0); somite_number - 2];
+
         Caterpillar::create_instance(
             py,
             config,
@@ -242,6 +250,8 @@ py_class!(class Caterpillar |py| {
             cell::Cell::new(0.0),
             dy,
             path_heights,
+            somite_distances,
+            somite_angles,
         )
     }
     def print_config(&self) -> PyResult<PyString> {
@@ -476,6 +486,24 @@ py_class!(class Caterpillar |py| {
         // return true if head is blocked by an obstacle and cannot move forward anymore
         Ok(self.dynamics(py).is_blocked_by_obstacle(self.somites(py).last().unwrap(), self.path_heights(py)))
     }
+    def get_somite_distances(&self) -> PyResult<PyTuple> {
+        // distance between i-th and (i+1)-th somite is saved in the i-th element of self.somite_distances(py)
+        Ok(
+            PyTuple::new(
+                py,
+                self.somite_distances(py).iter().map(|c| c.get().into_py_object(py).into_object()).collect::<Vec<PyObject>>().as_slice(),
+            )
+        )
+    }
+    def get_somite_angles(&self) -> PyResult<PyTuple> {
+        // angle around the i-th somite is saved in the (i-1)-th element of this tuple
+        Ok(
+            PyTuple::new(
+                py,
+                self.somite_angles(py).iter().map(|c| c.get().into_py_object(py).into_object()).collect::<Vec<PyObject>>().as_slice(),
+            )
+        )
+    }
 });
 
 /// Implementation of Caterpillar simulator.
@@ -551,6 +579,12 @@ impl Caterpillar {
                 new_position.x = s.get_position().x.min(new_position.x); // if blocked, cancel the forward move
             }
             s.set_position(new_position);
+
+        }
+
+        // save inter somite distances
+        for i in 0..self.somites(py).len()-1 {
+            self.somite_distances(py)[i].set((self.somites(py)[i].get_position() - self.somites(py)[i+1].get_position()).norm());
         }
     }
 
@@ -617,6 +651,9 @@ impl Caterpillar {
                     self.somites(py)[i].get_position(),
                     self.somites(py)[i + 1].get_position(),
                 );
+                // memorize angle in self.somite_angels
+                self.somite_angles(py)[i-1].set(current_angle); // angle around the i-th somite is saved in the (i-1)-th element of self.somite_angles(py)
+
                 match self.oscillators(py).get(&i) {
                     Some(oscillator) => {
                         let target_angle = phase2torsion_spring_target_angle(
