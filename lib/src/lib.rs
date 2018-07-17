@@ -61,6 +61,8 @@ py_module_initializer!(caterpillar, initcaterpillar, PyInit_caterpillar, |py, m|
 /// gravity_angle                               f64 to save gravity direction. 0 corresponds to locomotion on flat plain, 0~pi means climbing, pi means upside-down, pi~2pi means descending. default to 0
 /// dynamics                                    struct that defines mechanical dynamics
 /// path_heights                                holds height of each section in a path
+/// somite_distances                            holds inter segment distances at each step
+/// somite_angles                               holds angles around segments at each step
 /// 
 /// # Methods
 /// print_config(&self) -> PyResult<PyString>
@@ -87,6 +89,9 @@ py_module_initializer!(caterpillar, initcaterpillar, PyInit_caterpillar, |py, m|
 /// set_gravity_angle(&self, new_angle: f64) -> PyResult<PyObject>
 /// is_on_ground(&self) -> PyResult<bool>
 /// is_head_blocked(&self) -> PyResult<bool>
+/// get_somite_distances(&self) -> PyResult<PyTuple>
+/// get_somite_angles(&self) -> PyResult<PyTuple>
+
 py_class!(class Caterpillar |py| {
     data config: caterpillar_config::Config;
     data somites: Vec<somite::Somite>;
@@ -226,7 +231,7 @@ py_class!(class Caterpillar |py| {
         };
 
         // memory to save inter somite distances and angles
-        let somite_distances = vec![cell::Cell::<f64>::new(config.somite_radius); somite_number - 1];
+        let somite_distances = vec![cell::Cell::<f64>::new(config.somite_radius*2.0); somite_number - 1];
         let somite_angles = vec![cell::Cell::<f64>::new(0.0); somite_number - 2];
 
         Caterpillar::create_instance(
