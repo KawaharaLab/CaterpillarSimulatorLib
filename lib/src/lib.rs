@@ -100,7 +100,7 @@ py_class!(class Caterpillar |py| {
     data simulation_protocol: simulation_export::SimulationProc;
     data frame_count: cell::Cell<usize>;
     data temp_forces: Vec<cell::Cell<Coordinate>>;
-    data oscillators: collections::HashMap<usize, cell::RefCell<PhaseOscillator>>;
+    data oscillators: Vec<PhaseOscillator>;
     data oscillator_ids: Vec<usize>;
     data gripping_oscillators: Vec<PhaseOscillator>;
     data gripping_oscillator_ids: Vec<usize>;
@@ -163,17 +163,12 @@ py_class!(class Caterpillar |py| {
         // Hash
         //   key: on which somite(id) an oscillator is assigned
         //   value: instance of PhaseOscillator wrapped by RefCell
-        let mut oscillators = collections::HashMap::<usize, cell::RefCell<phase_oscillator::PhaseOscillator>>::new();
+        let mut oscillators = Vec::<PhaseOscillator>::with_capacity(somites_to_set_oscillater.len(py));
+        let mut oscillator_ids = Vec::<usize>::with_capacity(somites_to_set_oscillater.len(py));
         for somite_id in somites_to_set_oscillater.iter(py) {
-            let id = somite_id.extract::<usize>(py).unwrap();
-            oscillators.insert(
-                id,
-                cell::RefCell::<phase_oscillator::PhaseOscillator>::new(phase_oscillator::PhaseOscillator::new())
-            );
+            oscillators.push(PhaseOscillator::new());
+            oscillator_ids.push(somite_id.extract::<usize>(py).unwrap());
         }
-        // vec of somite ids where oscillators are assigned
-        let mut oscillator_ids = oscillators.keys().map(|k| {k.clone()}).collect::<Vec<usize>>();
-        oscillator_ids.sort();
 
         // oscillators for grippers
         // Hash
@@ -320,18 +315,19 @@ py_class!(class Caterpillar |py| {
         }
         Ok(py.None())
     }
-    def set_target_angle(&self, target_somite_oscillartor: usize, target_angle: f64) -> PyResult<PyObject> {
-        match self.oscillators(py).get(&target_somite_oscillartor) {
-            Some(_) => {},
-            None => panic!("no oscillator is set on somite {}", target_somite_oscillartor),
+    def set_target_angle(&self, target_somite_id: usize, target_angle: f64) -> PyResult<PyObject> {
+        match self.oscillator_ids(py).binary_search(&target_somite_id) {
+            Ok(_) => {
+                self.target_angles(py).borrow_mut().insert(target_somite_id, target_angle % (2.0*f64::consts::PI));
+                Ok(py.None())
+            },
+            Err(_) => Err(PyErr::new::<PyString, _>(py, &format!("segment with id {} does not hold an oscillator", target_somite_id))),
         }
-        self.target_angles(py).borrow_mut().insert(target_somite_oscillartor, target_angle % (2.0*f64::consts::PI));
-        Ok(py.None())
     }
     def step(&self, dt: f64) -> PyResult<PyObject> {
         // update somites' oscillators
-        for (_, oscillator) in self.oscillators(py) {
-            oscillator.borrow().step(self.config(py).normal_angular_velocity, dt);
+        for oscillator in self.oscillators(py) {
+            oscillator.step(self.config(py).normal_angular_velocity, dt);
         }
         // update grippers' oscillators
         for oscillator in self.gripping_oscillators(py) {
@@ -350,11 +346,7 @@ py_class!(class Caterpillar |py| {
         }
         // update phase oscillators for somite actuators
         for (i, f) in feedbacks_somites.iter(py).enumerate() {
-            self.oscillators(py)
-                .get(&self.order2somite_oscillator_id(py, i))
-                .unwrap()
-                .borrow_mut()
-                .step(self.config(py).normal_angular_velocity + f.extract::<f64>(py).unwrap(), dt);
+            self.oscillators(py)[i].step(self.config(py).normal_angular_velocity + f.extract::<f64>(py).unwrap(), dt);
         }
         // self.profiler(py).borrow_mut().check("updating oscillators for segments");
 
@@ -387,11 +379,7 @@ py_class!(class Caterpillar |py| {
         
         for _ in 0..steps { // run for several steps
             for (i, f) in feedbacks_somites.iter(py).enumerate() { // update phase oscillators for somite actuators
-                self.oscillators(py)
-                    .get(&self.order2somite_oscillator_id(py, i))
-                    .unwrap()
-                    .borrow_mut()
-                    .step(self.config(py).normal_angular_velocity + f.extract::<f64>(py).unwrap(), dt);
+                self.oscillators(py)[i].step(self.config(py).normal_angular_velocity + f.extract::<f64>(py).unwrap(), dt);
             }
             // update phase oscillators for grippers
             for (f, o) in feedbacks_grippers.iter(py).zip(self.gripping_oscillators(py).iter()) {
@@ -450,12 +438,9 @@ py_class!(class Caterpillar |py| {
     }
     def somite_phases(&self) -> PyResult<PyTuple> {
         Ok(
-            PyTuple::new(
-                py,
-                self.oscillator_ids(py).iter().map(|id| {
-                    self.oscillators(py).get(&id).unwrap().borrow().get_phase().into_py_object(py).into_object()
-                }).collect::<Vec<PyObject>>().as_slice()
-            )
+            PyTuple::new(py, self.oscillators(py).iter().map(|o| {
+                o.get_phase().into_py_object(py).into_object()
+            }).collect::<Vec<PyObject>>().as_slice())
         )
     }
     def gripper_phases(&self) -> PyResult<PyTuple> {
@@ -624,73 +609,70 @@ impl Caterpillar {
         // calculate force from friction, tension, dumping, etc.
         // collect temporary force applied on somites and reset temp_forces instance variable
 
-        self.profiler(py).borrow_mut().check("start calculating force");
+        // self.profiler(py).borrow_mut().check("start calculating force");
 
         let mut new_forces = self.temp_forces(py)
             .iter()
             .map(|f| f.replace(Coordinate::zero()))
             .collect::<Vec<Coordinate>>();
-        self.profiler(py).borrow_mut().check("add temporary force");
+        // self.profiler(py).borrow_mut().check("add temporary force");
 
         new_forces = self.add_gravitational_forces(py, new_forces);
-        self.profiler(py).borrow_mut().check("add gravity");
+        // self.profiler(py).borrow_mut().check("add gravity");
 
-        new_forces = self.add_spring_forces(
-            py,
-            self.config(py).sp_k,
-            self.config(py).sp_natural_length,
-            new_forces,
-        );
-        self.profiler(py).borrow_mut().check("add spring force");
+        let conf = self.config(py);
+        new_forces = self.add_spring_forces(py, conf.sp_k, conf.sp_natural_length, new_forces);
+        // self.profiler(py).borrow_mut().check("add spring force");
 
-        new_forces = self.add_dumper_forces(py, self.config(py).dp_c, new_forces);
-        self.profiler(py).borrow_mut().check("add dumper force");
+        new_forces = self.add_dumper_forces(py, conf.dp_c, new_forces);
+        // self.profiler(py).borrow_mut().check("add dumper force");
 
         // vertical torsion force coming from material mechanical
         let vertical_ts = torsion_spring::TorsionSpring::new(
-            self.config(py).vertical_ts_k0,
-            self.config(py).vertical_ts_k1,
-            Coordinate::new(0., 1., 0.),
+            conf.vertical_ts_k0, conf.vertical_ts_k1, Coordinate::new(0., 1., 0.),
         );
-        self.profiler(py).borrow_mut().check("create material torsion spring");
+        // self.profiler(py).borrow_mut().check("create material torsion spring");
 
         new_forces = self.add_material_torsion_spring_forces(py, vertical_ts, time_delta, new_forces);
-        self.profiler(py).borrow_mut().check("add material torsion spring forces");
+        // self.profiler(py).borrow_mut().check("add material torsion spring forces");
 
         // vertical torsion force comming from actuator
         let vertical_realtime_tunable_ts = torsion_spring::TorsionSpring::new(
-            self.config(py).vertical_realtime_tunable_torsion_spirng_k,
-            0.,
-            Coordinate::new(0., 1., 0.),
+            conf.vertical_realtime_tunable_torsion_spirng_k, 0., Coordinate::new(0., 1., 0.),
         );
-        self.profiler(py).borrow_mut().check("create rtts'");
+        // self.profiler(py).borrow_mut().check("create rtts'");
 
+        self.profiler(py).borrow_mut().check("");
+        let somites = self.somites(py); 
+        let somite_angles = self.somite_angles(py);
         // discrepancy angle is positive only if vertical realtime tunable spring is set, except for when target angle is set
-        let vertical_discrepancy_angles = (1..self.somites(py).len() - 1)
-            .map(|i| {
+        let mut oscillators_iter = self.oscillators(py).iter();
+        let mut oscillator_ids_iter = self.oscillator_ids(py).iter();
+        let mut next_oscillator = oscillators_iter.next();
+        let mut next_id = oscillator_ids_iter.next();
+        let vertical_discrepancy_angles = (1..somites.len() - 1).map(|i| {
                 // i is somite id
                 let current_angle = vertical_realtime_tunable_ts.current_angle(
-                    &self.somites(py)[i - 1].get_position(),
-                    &self.somites(py)[i].get_position(),
-                    &self.somites(py)[i + 1].get_position(),
+                    &somites[i - 1].get_position(), &somites[i].get_position(), &somites[i + 1].get_position(),
                 );
                 // memorize angle in self.somite_angels
-                self.somite_angles(py)[i-1].set(current_angle); // angle around the i-th somite is saved in the (i-1)-th element of self.somite_angles(py)
+                somite_angles[i-1].set(current_angle); // angle around the i-th somite is saved in the (i-1)-th element of self.somite_angles(py)
 
-                match self.oscillators(py).get(&i) {
-                    Some(oscillator) => {
-                        let target_angle = phase2torsion_spring_target_angle(
-                            oscillator.borrow().get_phase(),
-                            self.config(py).realtime_tunable_ts_rom_min,
-                            self.config(py).realtime_tunable_ts_rom_max,
-                        );
-                        // io::stdout().write(format!("target angle: {}  angel diff: {}\n", target_angle, target_angle - current_angle).as_bytes()).unwrap();
-                        target_angle - current_angle
-                    }
+                match next_id {
+                    Some(next_id_) => {
+                        if *next_id_ == i {
+                            let target_angle = phase2torsion_spring_target_angle(
+                                next_oscillator.unwrap().get_phase(), conf.realtime_tunable_ts_rom_min, conf.realtime_tunable_ts_rom_max);
+                            next_oscillator = oscillators_iter.next();
+                            next_id = oscillator_ids_iter.next();
+                            target_angle - current_angle
+                        } else {
+                            0.
+                        }
+                    },
                     None => 0.,
                 }
-            })
-            .collect::<Vec<f64>>();
+            }).collect::<Vec<f64>>();
         self.profiler(py).borrow_mut().check("calculate discrepancy angle");
 
         // calculate tension applied on each actuator for external reference
@@ -699,12 +681,12 @@ impl Caterpillar {
             &vertical_realtime_tunable_ts,
             &vertical_discrepancy_angles,
         );
-        self.profiler(py).borrow_mut().check("calculate rtts' forces");
+        // self.profiler(py).borrow_mut().check("calculate rtts' forces");
 
         for (i, tension) in realtime_tunable_torsion_spring_tensions.into_iter().enumerate() {
             self.realtime_tunable_torsion_spring_tensions(py)[i].set(tension);
         }
-        self.profiler(py).borrow_mut().check("save rtts' forces for reference");
+        // self.profiler(py).borrow_mut().check("save rtts' forces for reference");
 
         // add force coming from actuators
         new_forces = self.add_realtime_tunable_torsion_spring_forces(
@@ -713,13 +695,13 @@ impl Caterpillar {
             vertical_discrepancy_angles,
             new_forces,
         );
-        self.profiler(py).borrow_mut().check("add rtts' forces");
+        // self.profiler(py).borrow_mut().check("add rtts' forces");
 
         self.update_grippers(py);
-        self.profiler(py).borrow_mut().check("update grippers");
+        // self.profiler(py).borrow_mut().check("update grippers");
 
         new_forces = self.add_gripping_forces(py, new_forces);
-        self.profiler(py).borrow_mut().check("add gripping forces");
+        // self.profiler(py).borrow_mut().check("add gripping forces");
 
         // if a somite is on the ground, z-axis negative force is canceled
         self.mask_force_on_landing(py, new_forces)
@@ -902,10 +884,6 @@ impl Caterpillar {
             }
         }
         forces
-    }
-
-    fn order2somite_oscillator_id(&self, py: Python, i: usize) -> usize {
-        self.oscillator_ids(py)[i]
     }
 
     fn order2gripping_oscillator_id(&self, py: Python, i: usize) -> usize {
