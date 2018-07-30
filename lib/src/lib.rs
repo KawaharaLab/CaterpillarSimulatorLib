@@ -792,19 +792,22 @@ impl Caterpillar {
         time_delta: f64,
         mut forces: Vec<Coordinate>,
     ) -> Vec<Coordinate> {
+        let config = self.config(py);
+        let somites = self.somites(py);
+        let previous_vertical_ts_angles = self.previous_vertical_torsion_spring_angles(py);
 
-        for i in 1..(self.somites(py).len() - 1) {
-            let pos_base = self.somites(py)[i - 1].get_position();
-            let pos_center = self.somites(py)[i].get_position();
-            let pos_tip = self.somites(py)[i + 1].get_position();
+        for i in 1..(somites.len() - 1) {
+            let pos_base = somites[i - 1].get_position();
+            let pos_center = somites[i].get_position();
+            let pos_tip = somites[i + 1].get_position();
 
             let current_angle = t_spring.current_angle(&pos_base, &pos_center, &pos_tip);
 
             let angular_velocity = calculations::differentiate(
-                self.previous_vertical_torsion_spring_angles(py)[i-1].replace(current_angle), current_angle, time_delta).unwrap();
+                previous_vertical_ts_angles[i-1].replace(current_angle), current_angle, time_delta).unwrap();
 
             // calculate dumping torque
-            let dumping_coeff = self.config(py).vertical_ts_c;
+            let dumping_coeff = config.vertical_ts_c;
             let dumping_torque = -dumping_coeff * angular_velocity; // anti-clock-wise is positive rotation
 
             // torsion spring at i+1 th somite
