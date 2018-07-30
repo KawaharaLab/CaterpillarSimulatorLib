@@ -29,35 +29,16 @@ pub struct Dynamics {
     pub grip_phase_threshold: f64,
 }
 
-// const EPSILON: f64 = 10e-5;
+const EPSILON: f64 = 10e-5;
 const STUCK_EPSILON: f64 = 10e-3;
 
 impl Dynamics {
     /// Calculate shear force caused by friction between a somite and the substrate.
-    pub fn calculate_friction(&self, somite: &Somite, applied_force: &Coordinate) -> Coordinate {
-        Coordinate::new(self.shear_friction(somite.get_verocity(), applied_force), 0., 0.)
-    }
-
-    /// Calculate force caused by a gripper.
-    /// Gripping force is modeled by strong springs.
-    /// The gripping force only acts when gripping.
-    pub fn calculate_gripping_force(&self, somite: &Somite, applied_force: &Coordinate) -> Coordinate {
-        Coordinate::new(
-            self.grip_shear_force(somite.get_gripping_point().unwrap().x, somite.get_position().x, somite.get_verocity().x),
-            0.,
-            - applied_force.z, // cancel force along z axis if gripping
-        )
-    }
-
-    fn grip_shear_force(&self, resting_point: f64, current_point: f64, verocity: f64) -> f64 {
-        -self.shear_force_k * (current_point - resting_point) - self.shear_force_c * verocity
-    }
-
-    fn shear_friction(&self, verocity: Coordinate, applied_force: &Coordinate) -> f64 {
-        let normal_force = applied_force.z.min(0.).abs();
-        if verocity.x.abs() > 0. {
-            -verocity.x.signum() * self.dynamic_friction_coeff * normal_force
-                + self.viscosity_friction_coeff * -verocity.x
+    pub fn calculate_friction(&self, somite: &Somite, applied_force: &Coordinate) -> f64 {
+        let normal_force = -applied_force.z.min(0.);
+        let v_x = somite.get_verocity().x;
+        if v_x < -EPSILON || EPSILON < v_x {
+            -v_x.signum() * self.dynamic_friction_coeff * normal_force - self.viscosity_friction_coeff * v_x
         } else {
             let max_static_friction = self.static_friction_coeff * normal_force;
             if applied_force.x.abs() > max_static_friction {
@@ -68,12 +49,23 @@ impl Dynamics {
         }
     }
 
+    /// Calculate force caused by a gripper.
+    /// Gripping force is modeled by strong springs.
+    /// The gripping force only acts when gripping.
+    pub fn calculate_gripping_force(&self, somite: &Somite, gripping_point: &Coordinate, applied_force: &Coordinate) -> Coordinate {
+        Coordinate::new(
+            -self.shear_force_k * (somite.get_position().x - gripping_point.x) - self.shear_force_c * somite.get_verocity().x,
+            0.,
+            - applied_force.z, // cancel force along z axis if gripping
+        )
+    }
+
     pub fn is_blocked_by_obstacle(&self, somite: &Somite, path_height: &PathHeights) -> bool {
         somite.get_position().z < somite.radius + path_height.get_height(somite.get_position().x) - STUCK_EPSILON
     }
 
     pub fn should_grip(&self, somite: &Somite, oscillator: Ref<PhaseOscillator>, path_heights: &PathHeights) -> bool {
-        if oscillator.get_phase().sin() < self.grip_phase_threshold && path_heights.is_on_ground(somite, self.is_blocked_by_obstacle(somite, path_heights))
+        if oscillator.get_phase().sin() < self.grip_phase_threshold && path_heights.is_on_ground(somite)
             && !somite.is_gripping()
         {
             true

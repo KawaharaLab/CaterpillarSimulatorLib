@@ -33,7 +33,7 @@ impl Coordinate {
         (self.x.powi(2) + self.y.powi(2) + self.z.powi(2)).sqrt()
     }
 
-    pub fn inner_product(&self, rhs: Self) -> f64 {
+    pub fn inner_product(&self, rhs: &Self) -> f64 {
         self.x * rhs.x + self.y * rhs.y + self.z * rhs.z
     }
 
@@ -59,11 +59,9 @@ impl ops::Add for Coordinate {
 
 impl ops::AddAssign for Coordinate {
     fn add_assign(&mut self, rhs: Self) {
-        *self = Coordinate {
-            x: self.x + rhs.x,
-            y: self.y + rhs.y,
-            z: self.z + rhs.z,
-        };
+        self.x = self.x + rhs.x;
+        self.y = self.y + rhs.y;
+        self.z = self.z + rhs.z;
     }
 }
 
@@ -80,11 +78,9 @@ impl ops::Sub for Coordinate {
 
 impl ops::SubAssign for Coordinate {
     fn sub_assign(&mut self, rhs: Self) {
-        *self = Coordinate {
-            x: self.x - rhs.x,
-            y: self.y - rhs.y,
-            z: self.z - rhs.z,
-        };
+        self.x = self.x - rhs.x;
+        self.y = self.y - rhs.y;
+        self.z = self.z - rhs.z;
     }
 }
 

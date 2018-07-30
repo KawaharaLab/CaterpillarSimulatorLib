@@ -1,5 +1,7 @@
 use somite::Somite;
 
+const STUCK_EPSILON: f64 = 10e-3;
+
 /// PathHeights holds stepwise path heights.
 /// Each step (section) is represented by its start point and height.
 pub struct PathHeights {
@@ -26,24 +28,26 @@ impl PathHeights {
     }
 
     /// is_on_ground returns true if a given object is on the ground, and false otherwise 
-    pub fn is_on_ground(&self, s: &Somite, is_head_blocked: bool) -> bool {
-        let x = &s.get_position().x;
-        if x < self.start_points.first().unwrap() {
-            return s.is_on_ground(*self.heights.first().unwrap());
+    pub fn is_on_ground(&self, s: &Somite) -> bool {
+        let pos = s.get_position();
+
+        if pos.x < self.start_points[0] {
+            return s.is_on_ground(self.heights[0]);
         }
+
         for (i, start_point) in self.start_points.iter().enumerate() {
-            if start_point > x  {
-                if is_head_blocked {
+            if *start_point > pos.x  {
+                if pos.z < s.radius + self.heights[i-1] - STUCK_EPSILON {
                     return s.is_on_ground(self.heights[i-2]); // use the lower ground while being blocked
                 } else {
                     return s.is_on_ground(self.heights[i-1]); // the first start_point is 0, thus i>1
                 }
             }
         }
-        if is_head_blocked {
-            s.is_on_ground(*self.heights.get(self.heights.len()-2).unwrap()) // at least, 0 is set
+        if pos.z < s.radius + self.heights[self.heights.len()-1] - STUCK_EPSILON {
+            s.is_on_ground(self.heights[self.heights.len()-2]) // at least, 0 is set
         } else {
-            s.is_on_ground(*self.heights.last().unwrap()) // at least, 0 is set
+            s.is_on_ground(self.heights[self.heights.len()-1]) // at least, 0 is set
         }
     }
 

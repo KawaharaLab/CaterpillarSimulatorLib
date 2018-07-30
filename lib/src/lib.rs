@@ -54,7 +54,6 @@ py_module_initializer!(caterpillar, initcaterpillar, PyInit_caterpillar, |py, m|
 /// gripping_oscillators                        HashMap to somite id of where a grippper is attached and PhaseOscillator objects
 /// gripping_oscillator_ids                     Vec of somite ids where grippers  are attached
 /// oscillation_ranges                          region of motion for each actuator in a somite
-/// frictional_forces                           Vec of force objects to save friction on each somite which is used to tell them to an external controller
 /// gripping_forces                             Vec of force object to save gripping force on each somite which is used to tell them to an external controller
 /// target_angles                               HashMap of somite ids where actuators are attached and its bending angle. Used to specify default angles.
 /// realtime_tunable_torsion_spring_tensions                     Vec of tension values applied on actuators
@@ -105,12 +104,11 @@ py_class!(class Caterpillar |py| {
     data gripping_oscillators: collections::HashMap<usize, cell::RefCell<phase_oscillator::PhaseOscillator>>;
     data gripping_oscillator_ids: Vec<usize>;
     data oscillation_ranges: collections::HashMap<usize, cell::Cell<f64>>;
-    data frictional_forces: Vec<cell::Cell<Coordinate>>;
     data gripping_forces: Vec<cell::Cell<Coordinate>>;
     data target_angles: cell::RefCell<collections::HashMap<usize, f64>>;
     data realtime_tunable_torsion_spring_tensions: Vec<cell::Cell<f64>>;
     data gripping_thresholds: collections::HashMap<usize, cell::Cell<f64>>;
-    data previous_vertical_torsion_spring_angles: collections::HashMap<usize, cell::Cell<f64>>;
+    data previous_vertical_torsion_spring_angles: Vec<cell::Cell<f64>>;
     data gravity_angle: cell::Cell<f64>;
     data dynamics: Dynamics;
     data path_heights: PathHeights;
@@ -213,14 +211,13 @@ py_class!(class Caterpillar |py| {
             oscillation_ranges.insert(*somite_id, cell::Cell::<f64>::new(config.realtime_tunable_ts_rom_min));
         }
 
-        let initial_frictions = (0..somite_number).map(|_| {cell::Cell::new(Coordinate::zero())}).collect();
         let initial_gripping_force = (0..somite_number).map(|_| {cell::Cell::new(Coordinate::zero())}).collect();
         let target_angles = cell::RefCell::<collections::HashMap<usize, f64>>::new(collections::HashMap::<usize, f64>::new());
         let tensions = (0..somite_number-2).map(|_| {cell::Cell::<f64>::new(0.)}).collect::<Vec<cell::Cell<f64>>>(); // used to save and give it to an external controller
 
-        let mut previous_vertical_torsion_spring_angles = collections::HashMap::<usize, cell::Cell<f64>>::new();
-        for i in 1..somite_number-1 {
-            previous_vertical_torsion_spring_angles.insert(i as usize, cell::Cell::<f64>::new(0.));
+        let mut previous_vertical_torsion_spring_angles = Vec::<cell::Cell<f64>>::with_capacity(somite_number - 2);
+        for _ in 1..somite_number-1 {
+            previous_vertical_torsion_spring_angles.push(cell::Cell::<f64>::new(0.));
         }
 
         // struct which defines mechanical dynamics
@@ -249,7 +246,6 @@ py_class!(class Caterpillar |py| {
             gripping_oscillators,
             gripping_oscillator_ids,
             oscillation_ranges,
-            initial_frictions,
             initial_gripping_force,
             target_angles,
             tensions,
@@ -437,14 +433,6 @@ py_class!(class Caterpillar |py| {
         self.update_state(py, dt);
         Ok(py.None())
     }
-    def frictions_x(&self) -> PyResult<PyTuple> {
-        Ok(
-            PyTuple::new(
-                py,
-                self.frictional_forces(py).iter().map(|f| {f.get().x.into_py_object(py).into_object()}).collect::<Vec<PyObject>>().as_slice()
-            )
-        )
-    }
     def gripping_force_x(&self) -> PyResult<PyTuple> {
         Ok(
             PyTuple::new(
@@ -499,7 +487,7 @@ py_class!(class Caterpillar |py| {
         Ok(py.None())
     }
     def is_on_ground(&self) -> PyResult<bool> {
-        Ok(self.somites(py).iter().fold(false, |acc, ref s| acc ||  self.path_heights(py).is_on_ground(s, self.dynamics(py).is_blocked_by_obstacle(s, self.path_heights(py)))))
+        Ok(self.somites(py).iter().fold(false, |acc, ref s| acc ||  self.path_heights(py).is_on_ground(s)))
     }
     def set_gripper_phase(&self, somite_id: i64, phase: f64) -> PyResult<PyObject> {
         // set phase of gripper oscillator on soimte designated by somite_id
@@ -631,7 +619,7 @@ impl Caterpillar {
             let mut new_verocity = s.get_verocity() + (s.get_force() + new_forces[i]) * 0.5 * time_delta / s.mass;
             if s.is_gripping() {
                 new_verocity.z = 0.; // cannot move if gripping
-            } else if self.path_heights(py).is_on_ground(s, self.dynamics(py).is_blocked_by_obstacle(s, self.path_heights(py))) {
+            } else if self.path_heights(py).is_on_ground(s) {
                 new_verocity.z = new_verocity.z.max(0.);
             }
             s.set_verocity(new_verocity);
@@ -678,11 +666,7 @@ impl Caterpillar {
         );
         // self.profiler(py).borrow_mut().check("create material torsion spring");
 
-        let zero_angles = (1..self.somites(py).len() - 1)
-            .map(|_| 0.)
-            .collect::<Vec<f64>>();
-        // self.profiler(py).borrow_mut().check("create zero angles");
-        new_forces = self.add_torsion_spring_forces(py, vertical_ts, zero_angles, time_delta, new_forces);
+        new_forces = self.add_material_torsion_spring_forces(py, vertical_ts, time_delta, new_forces);
         // self.profiler(py).borrow_mut().check("add material torsion spring forces");
 
         // vertical torsion force comming from actuator
@@ -698,9 +682,9 @@ impl Caterpillar {
             .map(|i| {
                 // i is somite id
                 let current_angle = vertical_realtime_tunable_ts.current_angle(
-                    self.somites(py)[i - 1].get_position(),
-                    self.somites(py)[i].get_position(),
-                    self.somites(py)[i + 1].get_position(),
+                    &self.somites(py)[i - 1].get_position(),
+                    &self.somites(py)[i].get_position(),
+                    &self.somites(py)[i + 1].get_position(),
                 );
                 // memorize angle in self.somite_angels
                 self.somite_angles(py)[i-1].set(current_angle); // angle around the i-th somite is saved in the (i-1)-th element of self.somite_angles(py)
@@ -757,7 +741,7 @@ impl Caterpillar {
     /// this process should be the very end of resultant force calculation
     fn mask_force_on_landing(&self, py: Python, mut forces: Vec<Coordinate>) -> Vec<Coordinate> {
         for (i, s) in self.somites(py).iter().enumerate() {
-            if self.path_heights(py).is_on_ground(s, self.dynamics(py).is_blocked_by_obstacle(s, self.path_heights(py))) {
+            if self.path_heights(py).is_on_ground(s) {
                 forces[i].z = forces[i].z.max(0.)
             }
         }
@@ -813,74 +797,35 @@ impl Caterpillar {
         forces
     }
 
-    fn add_torsion_spring_forces(
+    fn add_material_torsion_spring_forces(
         &self,
         py: Python,
         t_spring: torsion_spring::TorsionSpring,
-        target_angles: Vec<f64>,
         time_delta: f64,
         mut forces: Vec<Coordinate>,
     ) -> Vec<Coordinate> {
-        // target_angles[i-1] corresponds to a torsion spring on somite i
-        self.profiler(py).borrow_mut().check("start add torsion spring force");
-
-        if target_angles.len() != self.somites(py).len() - 2 {
-            panic!(
-                "target_angles should be somites.len() - 2 = {}, got {}",
-                self.somites(py).len() - 2,
-                target_angles.len()
-            );
-        }
-        self.profiler(py).borrow_mut().check("end check");
 
         for i in 1..(self.somites(py).len() - 1) {
-            // calculate dumping torque
-            // self.profiler(py).borrow_mut().check("");
+            let pos_base = self.somites(py)[i - 1].get_position();
+            let pos_center = self.somites(py)[i].get_position();
+            let pos_tip = self.somites(py)[i + 1].get_position();
 
-            let angle = t_spring.current_angle(
-                self.somites(py)[i - 1].get_position(),
-                self.somites(py)[i].get_position(),
-                self.somites(py)[i + 1].get_position(),
-            );
-            // self.profiler(py).borrow_mut().check("get current angle");
+            let current_angle = t_spring.current_angle(&pos_base, &pos_center, &pos_tip);
 
             let angular_velocity = calculations::differentiate(
-                self.previous_vertical_torsion_spring_angles(py)
-                    .get(&i)
-                    .unwrap()
-                    .get(),
-                angle,
-                time_delta,
-            ).unwrap();
-            // self.profiler(py).borrow_mut().check("get angular velocity");
+                self.previous_vertical_torsion_spring_angles(py)[i-1].replace(current_angle), current_angle, time_delta).unwrap();
 
+            // calculate dumping torque
             let dumping_coeff = self.config(py).vertical_ts_c;
             let dumping_torque = -dumping_coeff * angular_velocity; // anti-clock-wise is positive rotation
 
             // torsion spring at i+1 th somite
-            let (force_on_t, force_on_b) = t_spring.force(
-                self.somites(py)[i - 1].get_position(),
-                self.somites(py)[i].get_position(),
-                self.somites(py)[i + 1].get_position(),
-                target_angles[i - 1],
-                dumping_torque,
-            );
-            // self.profiler(py).borrow_mut().check("calculate torsion spring force");
+            let (force_on_t, force_on_b) = t_spring.force_to_target_angle(&pos_base, &pos_center, &pos_tip, current_angle, 0.0, dumping_torque);
 
             forces[i - 1] += force_on_b;
             forces[i] -= force_on_b + force_on_t; // reaction
             forces[i + 1] += force_on_t;
-            // self.profiler(py).borrow_mut().check("set force");
-
-            // memorize current angle
-            self.previous_vertical_torsion_spring_angles(py)
-                .get(&i)
-                .unwrap()
-                .set(angle);
-            // self.profiler(py).borrow_mut().check("memorize current angle");
-            // self.profiler(py).borrow_mut().check("end one loop");
         }
-        self.profiler(py).borrow_mut().check("end add torsion spring force");
         forces
     }
 
@@ -954,30 +899,15 @@ impl Caterpillar {
 
     /// add shear force, i.e., force long to x axis, and force along z axis caused by gripper
     fn add_gripping_forces(&self, py: Python, mut forces: Vec<Coordinate>) -> Vec<Coordinate> {
-        // self.profiler(py).borrow_mut().check("start add gripping force");
-
-        for (i, s) in self.somites(py).iter().enumerate() {
-            if let Some(_) = s.get_gripping_point() { // grip point being set means the somite has a leg
-                // self.profiler(py).borrow_mut().check("");
-                let gripping_force = self.dynamics(py).calculate_gripping_force(&s, &forces[i]);
-                // self.profiler(py).borrow_mut().check("calculate grip force");
+        for (i, (s, mut gripper)) in self.somites(py).iter().zip(self.gripping_forces(py).into_iter()).enumerate() {
+            if let Some(gp) = s.get_gripping_point() { // grip point being set means the somite has a leg
+                let gripping_force = self.dynamics(py).calculate_gripping_force(&s, &gp, &forces[i]);
                 forces[i] += gripping_force;
-                // self.profiler(py).borrow_mut().check("add grip force");
-                self.gripping_forces(py)[i].set(gripping_force); // for external reference
-                // self.profiler(py).borrow_mut().check("save grip force");
-                self.frictional_forces(py)[i].set(Coordinate::zero()); // for external reference
-                // self.profiler(py).borrow_mut().check("save zero friction force");
-
-            } else if self.path_heights(py).is_on_ground(s, self.dynamics(py).is_blocked_by_obstacle(s, self.path_heights(py))) {
-                // self.profiler(py).borrow_mut().check("");
-                let friction = self.dynamics(py).calculate_friction(&s, &forces[i]);
-                // self.profiler(py).borrow_mut().check("calculate frictional force");
-                forces[i] += friction;
-                // self.profiler(py).borrow_mut().check("add frictional force");
-                self.gripping_forces(py)[i].set(Coordinate::zero()); // for external reference
-                // self.profiler(py).borrow_mut().check("save zero gripping force");
-                self.frictional_forces(py)[i].set(friction); // for external reference
-                // self.profiler(py).borrow_mut().check("save friction force");
+                gripper.set(gripping_force); // for external reference
+            } else if self.path_heights(py).is_on_ground(s) {
+                let friction_x = self.dynamics(py).calculate_friction(&s, &forces[i]);
+                forces[i].x += friction_x;
+                gripper.set(Coordinate::zero()); // for external reference
             }
         }
         forces

@@ -27,22 +27,18 @@ impl TorsionSpring {
         }
     }
 
-    pub fn force(
-        &self,
-        base: coordinate::Coordinate,
-        center: coordinate::Coordinate,
-        tip: coordinate::Coordinate,
-        target_angle: f64,
-        dumping_torque: f64,
+    pub fn force_to_target_angle(
+        &self, base: &coordinate::Coordinate, center: &coordinate::Coordinate, tip: &coordinate::Coordinate,
+        current_angle: f64, target_angle: f64, dumping_torque: f64,
     ) -> (coordinate::Coordinate, coordinate::Coordinate) {
         // calculate torsion force applied on tip and base, so that Arg(base-center, center-tip) anti-clock-wise to standard_vector becomes target_angular.
         // force applied on tip and base is or symmetrical.
         // base and tip are not symmetric, i.e. if you swap base and tip you should modify target_angular to (2*PI - original_target_angle).
         // range of target_angle is [0, 2*PI], if it exceeds target_angle % 2*PI will be used.
         // dumping_torque is c \dot{\theta_{relative}}. anti-clock-wise is positive.
-        let vec_bc = center - base;
-        let vec_ct = tip - center;
-        let angle_diff = self.angle(vec_bc, vec_ct) - target_angle;
+        let vec_bc = *center - *base;
+        let vec_ct = *tip - *center;
+        let angle_diff = current_angle - target_angle;
         if angle_diff.abs() < EPSILON {
             // take into account numeric error
             (
@@ -51,10 +47,8 @@ impl TorsionSpring {
             )
         } else {
             (
-                self.normal_vector(vec_ct)
-                    * (-self.calculate_spring_constant(angle_diff) * angle_diff + dumping_torque),
-                self.normal_vector(vec_bc)
-                    * (-self.calculate_spring_constant(angle_diff) * angle_diff - dumping_torque),
+                self.normal_vector(&vec_ct) * (-self.calculate_spring_constant(angle_diff) * angle_diff + dumping_torque),
+                self.normal_vector(&vec_bc) * (-self.calculate_spring_constant(angle_diff) * angle_diff - dumping_torque),
             )
         }
     }
@@ -84,34 +78,35 @@ impl TorsionSpring {
         //     )
         // }
         (
-            self.normal_vector(vec_ct) * self.calculate_spring_constant(discrepancy_angle) * discrepancy_angle,
-            self.normal_vector(vec_bc) * self.calculate_spring_constant(discrepancy_angle) * discrepancy_angle,
+            self.normal_vector(&vec_ct) * self.calculate_spring_constant(discrepancy_angle) * discrepancy_angle,
+            self.normal_vector(&vec_bc) * self.calculate_spring_constant(discrepancy_angle) * discrepancy_angle,
         )
     }
 
     pub fn current_angle(
         &self,
-        base: coordinate::Coordinate,
-        center: coordinate::Coordinate,
-        tip: coordinate::Coordinate,
+        base: &coordinate::Coordinate,
+        center: &coordinate::Coordinate,
+        tip: &coordinate::Coordinate,
     ) -> f64 {
         // 1.0 if current angle -> target angle is anti-clock-wise
         // -1.0 if current angle -> target angle is anti-clock-wise
-        let vec_bc = center - base;
-        let vec_ct = tip - center;
-        self.angle(vec_bc, vec_ct)
+        let vec_bc = *center - *base;
+        let vec_ct = *tip - *center;
+        self.angle(&vec_bc, &vec_ct)
     }
 
     fn calculate_spring_constant(&self, target_angle: f64) -> f64 {
         self.spring_constant_k0 + self.spring_constant_k1 * target_angle.abs()
     }
 
-    fn normal_vector(&self, v: coordinate::Coordinate) -> coordinate::Coordinate {
+    fn normal_vector(&self, v: &coordinate::Coordinate) -> coordinate::Coordinate {
         // anti-clock-wise orthogonal vector to v, whose norm is 1
-        self.standard_vector.cross_product(self.project(v)) / self.project(v).norm()
+        let v_ = self.project(v);
+        self.standard_vector.cross_product(v_) / v_.norm()
     }
 
-    fn angle(&self, v1: coordinate::Coordinate, v2: coordinate::Coordinate) -> f64 {
+    fn angle(&self, v1: &coordinate::Coordinate, v2: &coordinate::Coordinate) -> f64 {
         // Arg(v1, v2) anti-clock-wise to the standard_vector
         if self.sin(v1, v2) >= 0.0 {
             self.cos(v1, v2).acos()
@@ -120,22 +115,22 @@ impl TorsionSpring {
         }
     }
 
-    fn cos(&self, v1: coordinate::Coordinate, v2: coordinate::Coordinate) -> f64 {
+    fn cos(&self, v1: &coordinate::Coordinate, v2: &coordinate::Coordinate) -> f64 {
         let v1_ = self.project(v1);
         let v2_ = self.project(v2);
-        v1_.inner_product(v2_) / (v1_.norm() * v2_.norm())
+        v1_.inner_product(&v2_) / (v1_.norm() * v2_.norm())
     }
 
-    fn sin(&self, v1: coordinate::Coordinate, v2: coordinate::Coordinate) -> f64 {
+    fn sin(&self, v1: &coordinate::Coordinate, v2: &coordinate::Coordinate) -> f64 {
         let v1_ = self.project(v1);
         let v2_ = self.project(v2);
         let cross = v1_.cross_product(v2_);
         cross.norm() / (v1_.norm() * v2_.norm())
-            * cross.inner_product(self.standard_vector).signum()
+            * cross.inner_product(&self.standard_vector).signum()
     }
 
-    fn project(&self, v: coordinate::Coordinate) -> coordinate::Coordinate {
-        v - self.standard_vector * self.standard_vector.inner_product(v)
+    fn project(&self, v: &coordinate::Coordinate) -> coordinate::Coordinate {
+        *v - self.standard_vector * self.standard_vector.inner_product(&v)
     }
 }
 
