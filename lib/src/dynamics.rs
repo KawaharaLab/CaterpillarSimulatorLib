@@ -1,4 +1,3 @@
-use std::cell::Ref;
 use coordinate::Coordinate;
 use somite::Somite;
 use phase_oscillator::PhaseOscillator;
@@ -64,22 +63,12 @@ impl Dynamics {
         somite.get_position().z < somite.radius + path_height.get_height(somite.get_position().x) - STUCK_EPSILON
     }
 
-    pub fn should_grip(&self, somite: &Somite, oscillator: Ref<PhaseOscillator>, path_heights: &PathHeights) -> bool {
-        if oscillator.get_phase().sin() < self.grip_phase_threshold && path_heights.is_on_ground(somite)
-            && !somite.is_gripping()
-        {
-            true
-        } else {
-            false
-        }
+    pub fn should_grip(&self, somite: &Somite, oscillator: &PhaseOscillator, path_heights: &PathHeights) -> bool {
+        oscillator.get_phase().sin() < self.grip_phase_threshold && path_heights.is_on_ground(somite) && !somite.is_gripping()
     }
 
-    pub fn should_release(&self, somite: &Somite, oscillator: Ref<PhaseOscillator>) -> bool {
-        if oscillator.get_phase().sin() >= self.grip_phase_threshold && somite.is_gripping() {
-            true
-        } else {
-            false
-        }
+    pub fn should_release(&self, somite: &Somite, oscillator: &PhaseOscillator) -> bool {
+        oscillator.get_phase().sin() >= self.grip_phase_threshold && somite.is_gripping()
     }
 }
 

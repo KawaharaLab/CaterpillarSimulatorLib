@@ -1,27 +1,32 @@
 use std::fmt;
+use std::cell;
 
-#[derive(Copy, Clone)]
 pub struct PhaseOscillator {
-    current_phase: f64,
+    current_phase: cell::Cell<f64>,
 }
 
 impl PhaseOscillator {
     pub fn new() -> Self {
-        PhaseOscillator { current_phase: 0. }
+        PhaseOscillator { current_phase: cell::Cell::new(0.) }
     }
 
     pub fn get_phase(&self) -> f64 {
-        self.current_phase
+        self.current_phase.get()
     }
 
-    pub fn set_phase(&mut self, phase: f64) {
-        self.current_phase = phase
+    pub fn set_phase(&self, phase: f64) {
+        self.current_phase.set(phase);
     }
 
-    pub fn step(&mut self, phase_speed: f64, time_delta: f64) -> f64 {
+    pub fn replace_phase(&self, phase: f64) -> f64 {
+        self.current_phase.replace(phase)
+    }
+
+    pub fn step(&self, phase_speed: f64, time_delta: f64) -> f64 {
         // proceed one step and return new updated phase
-        self.current_phase += phase_speed * time_delta;
-        self.current_phase
+        let updated_phase = self.current_phase.get() + phase_speed * time_delta;
+        self.current_phase.set(updated_phase);
+        updated_phase
     }
 }
 
