@@ -334,42 +334,35 @@ py_class!(class Caterpillar |py| {
         for oscillator in self.gripping_oscillators(py) {
             oscillator.step(self.config(py).normal_angular_velocity, dt);
         }
-        self.update_state(py, dt);
+        self.update_state(py, dt, self.simulation_protocol(py), self.frame_count(py));
         Ok(py.None())
     }
     def step_with_feedbacks(&self, dt: f64, feedbacks_somites: PyTuple, feedbacks_grippers: PyTuple) -> PyResult<PyObject> {
-        self.profiler(py).borrow_mut().reset_time();
         if feedbacks_somites.len(py) != self.oscillators(py).len() {
             panic!("number of elements in feedbacks_somites and oscillator controllers for somites are inconsistent");
         }
         if feedbacks_grippers.len(py) != self.gripping_oscillators(py).len() {
             panic!("number of elements in feedbacks_grippers and oscillator controllers for grippers are inconsistent");
         }
-        // update phase oscillators for somite actuators
-        for (i, f) in feedbacks_somites.iter(py).enumerate() {
-            self.oscillators(py)[i].step(self.config(py).normal_angular_velocity + f.extract::<f64>(py).unwrap(), dt);
-        }
-        // self.profiler(py).borrow_mut().check("updating oscillators for segments");
 
+        let conf = self.config(py);
+        // update phase oscillators for somite actuators
+        for (f, o) in feedbacks_somites.iter(py).zip(self.oscillators(py).iter()) {
+            o.step(conf.normal_angular_velocity + f.extract::<f64>(py).unwrap(), dt);
+        }
         // update phase oscillators for grippers
         for (f, o) in feedbacks_grippers.iter(py).zip(self.gripping_oscillators(py).iter()) {
-            o.step(self.config(py).normal_angular_velocity + f.extract::<f64>(py).unwrap(), dt);
+            o.step(conf.normal_angular_velocity + f.extract::<f64>(py).unwrap(), dt);
         }
-        // self.profiler(py).borrow_mut().check("updating oscillators for grippers");
 
-        self.update_state(py, dt);
-        // self.profiler(py).borrow_mut().check("after updating states");
-
+        self.update_state(py, dt, self.simulation_protocol(py), self.frame_count(py));
         Ok(py.None())
     }
     def save_profile(&self, profile_save_file: PyString) -> PyResult<PyObject> {
         self.profiler(py).borrow_mut().save(&*(profile_save_file.to_string_lossy(py)));
         Ok(py.None())
     }
-    def steps_with_feedbacks(&self, dt: f64, steps: u8, feedbacks_somites: PyTuple, feedbacks_grippers: PyTuple, profile_save_file: PyString) -> PyResult<PyObject> {
-        self.profiler(py).borrow_mut().reset_memo();
-        self.profiler(py).borrow_mut().reset_time();
-
+    def steps_with_feedbacks(&self, dt: f64, steps: u8, feedbacks_somites: PyTuple, feedbacks_grippers: PyTuple) -> PyResult<PyObject> {
         // run simulation for several steps of dt using fixed feedbacks
         if feedbacks_somites.len(py) != self.oscillators(py).len() {
             panic!("number of elements in feedbacks_somites and oscillator controllers for somites are inconsistent");
@@ -378,6 +371,8 @@ py_class!(class Caterpillar |py| {
             panic!("number of elements in feedbacks_grippers and oscillator controllers for grippers are inconsistent");
         }
         
+        let simulation_protocol = self.simulation_protocol(py);
+        let frame_count  = self.frame_count(py);
         for _ in 0..steps { // run for several steps
             for (i, f) in feedbacks_somites.iter(py).enumerate() { // update phase oscillators for somite actuators
                 self.oscillators(py)[i].step(self.config(py).normal_angular_velocity + f.extract::<f64>(py).unwrap(), dt);
@@ -386,9 +381,8 @@ py_class!(class Caterpillar |py| {
             for (f, o) in feedbacks_grippers.iter(py).zip(self.gripping_oscillators(py).iter()) {
                 o.step(self.config(py).normal_angular_velocity + f.extract::<f64>(py).unwrap(), dt);
             }
-            self.update_state(py, dt);
+            self.update_state(py, dt, simulation_protocol, frame_count);
         }
-        self.profiler(py).borrow_mut().save(&*(profile_save_file.to_string_lossy(py)));
         Ok(py.None())
     }
     def step_with_target_angles(&self, dt: f64, somite_target_angles: PyTuple, gripper_target_phases: PyTuple) -> PyResult<PyObject> {
@@ -405,7 +399,7 @@ py_class!(class Caterpillar |py| {
             o.set_phase(target_phase.extract::<f64>(py).unwrap());
         }
 
-        self.update_state(py, dt);
+        self.update_state(py, dt, self.simulation_protocol(py), self.frame_count(py));
         Ok(py.None())
     }
     def gripping_force_x(&self) -> PyResult<PyTuple> {
@@ -521,34 +515,19 @@ impl Caterpillar {
         sum / (self.somites(py).len() as f64)
     }
 
-    fn update_state(&self, py: Python, time_delta: f64) {
-        // self.profiler(py).borrow_mut().check("start updating state");
-        
+    fn update_state(&self, py: Python, time_delta: f64, simulation_protocol: &simulation_export::SimulationProc, frame_count: &cell::Cell<usize>) {
         self.update_somite_positions(py, time_delta);
-        // self.profiler(py).borrow_mut().check("update segment positions");
-        
         let new_forces = self.calculate_force_on_somites(py, time_delta);
-        // self.profiler(py).borrow_mut().check("calculate forces");
-
         self.update_somite_verocities(py, time_delta, &new_forces);
-        // self.profiler(py).borrow_mut().check("update velocities");
-
         self.update_somite_forces(py, &new_forces);
-        // self.profiler(py).borrow_mut().check("update forces");
 
         // save simulation result
         let decimation_span = 10_usize;
-        if self.frame_count(py).get() % decimation_span == 0_usize {
+        if frame_count.get() % decimation_span == 0_usize {
             // save the step into simulation protocol
-            self.simulation_protocol(py).add_frame(
-                self.frame_count(py).get() / decimation_span,
-                self.build_current_frame(py),
-            );
+            simulation_protocol.add_frame(frame_count.get() / decimation_span, self.build_current_frame(py));
         }
-        // self.profiler(py).borrow_mut().check("save simulation results");
-
-        self.frame_count(py).set(self.frame_count(py).get() + 1);
-        // self.profiler(py).borrow_mut().check("set frame count");
+        frame_count.set(frame_count.get() + 1);
     }
 
     fn build_current_frame(&self, py: Python) -> Vec<simulation_export::ObjectPosition> {
