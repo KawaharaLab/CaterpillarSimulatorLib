@@ -706,9 +706,10 @@ impl Caterpillar {
     }
 
     fn add_gravitational_forces(&self, py: Python, mut forces: Vec<Coordinate>) -> Vec<Coordinate> {
+        let gravity_angle = self.gravity_angle(py).get();
         for (i, s) in self.somites(py).iter().enumerate() {
-            forces[i].z += -GRAVITATIONAL_ACCELERATION * s.mass * self.gravity_angle(py).get().cos();
-            forces[i].x += -GRAVITATIONAL_ACCELERATION * s.mass * self.gravity_angle(py).get().sin();
+            forces[i].z += -GRAVITATIONAL_ACCELERATION * s.mass * gravity_angle.cos();
+            forces[i].x += -GRAVITATIONAL_ACCELERATION * s.mass * gravity_angle.sin();
         }
         forces
     }
