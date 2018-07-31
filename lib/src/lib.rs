@@ -522,19 +522,19 @@ impl Caterpillar {
     }
 
     fn update_state(&self, py: Python, time_delta: f64) {
-        self.profiler(py).borrow_mut().check("start updating state");
+        // self.profiler(py).borrow_mut().check("start updating state");
         
         self.update_somite_positions(py, time_delta);
-        self.profiler(py).borrow_mut().check("update segment positions");
+        // self.profiler(py).borrow_mut().check("update segment positions");
         
         let new_forces = self.calculate_force_on_somites(py, time_delta);
-        self.profiler(py).borrow_mut().check("calculate forces");
+        // self.profiler(py).borrow_mut().check("calculate forces");
 
         self.update_somite_verocities(py, time_delta, &new_forces);
-        self.profiler(py).borrow_mut().check("update velocities");
+        // self.profiler(py).borrow_mut().check("update velocities");
 
         self.update_somite_forces(py, &new_forces);
-        self.profiler(py).borrow_mut().check("update forces");
+        // self.profiler(py).borrow_mut().check("update forces");
 
         // save simulation result
         let decimation_span = 10_usize;
@@ -545,10 +545,10 @@ impl Caterpillar {
                 self.build_current_frame(py),
             );
         }
-        self.profiler(py).borrow_mut().check("save simulation results");
+        // self.profiler(py).borrow_mut().check("save simulation results");
 
         self.frame_count(py).set(self.frame_count(py).get() + 1);
-        self.profiler(py).borrow_mut().check("set frame count");
+        // self.profiler(py).borrow_mut().check("set frame count");
     }
 
     fn build_current_frame(&self, py: Python) -> Vec<simulation_export::ObjectPosition> {
@@ -594,14 +594,15 @@ impl Caterpillar {
     fn update_somite_verocities(&self, py: Python, time_delta: f64, new_forces: &Vec<Coordinate>) {
         // update somite verocities based on Velret's method
         // v_{t+1} = v_{t} +  \delta \frac{t (f_{t, x_t} + f_{t+1, x_{t+1}})}{2}
+        let path_heights = self.path_heights(py);
         for (i, s) in self.somites(py).iter().enumerate() {
-            let mut new_verocity = s.get_verocity() + (s.get_force() + new_forces[i]) * 0.5 * time_delta / s.mass;
+            let mut new_velocity = s.get_verocity() + (s.get_force() + new_forces[i]) * 0.5 * time_delta / s.mass;
             if s.is_gripping() {
-                new_verocity.z = 0.; // cannot move if gripping
-            } else if self.path_heights(py).is_on_ground(s) {
-                new_verocity.z = new_verocity.z.max(0.);
+                new_velocity.z = 0.; // cannot move if gripping
+            } else if path_heights.is_on_ground(s) {
+                new_velocity.z = new_velocity.z.max(0.);
             }
-            s.set_verocity(new_verocity);
+            s.set_verocity(new_velocity);
         }
     }
 
