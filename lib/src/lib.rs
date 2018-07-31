@@ -609,40 +609,39 @@ impl Caterpillar {
         // calculate force from friction, tension, dumping, etc.
         // collect temporary force applied on somites and reset temp_forces instance variable
 
-        // self.profiler(py).borrow_mut().check("start calculating force");
+        self.profiler(py).borrow_mut().check("start calculating force");
 
         let mut new_forces = self.temp_forces(py)
             .iter()
             .map(|f| f.replace(Coordinate::zero()))
             .collect::<Vec<Coordinate>>();
-        // self.profiler(py).borrow_mut().check("add temporary force");
+        self.profiler(py).borrow_mut().check("add temporary force");
 
         new_forces = self.add_gravitational_forces(py, new_forces);
-        // self.profiler(py).borrow_mut().check("add gravity");
+        self.profiler(py).borrow_mut().check("add gravity");
 
         let conf = self.config(py);
         new_forces = self.add_spring_forces(py, conf.sp_k, conf.sp_natural_length, new_forces);
-        // self.profiler(py).borrow_mut().check("add spring force");
+        self.profiler(py).borrow_mut().check("add spring force");
 
         new_forces = self.add_dumper_forces(py, conf.dp_c, new_forces);
-        // self.profiler(py).borrow_mut().check("add dumper force");
+        self.profiler(py).borrow_mut().check("add dumper force");
 
         // vertical torsion force coming from material mechanical
         let vertical_ts = torsion_spring::TorsionSpring::new(
             conf.vertical_ts_k0, conf.vertical_ts_k1, Coordinate::new(0., 1., 0.),
         );
-        // self.profiler(py).borrow_mut().check("create material torsion spring");
+        self.profiler(py).borrow_mut().check("create material torsion spring");
 
         new_forces = self.add_material_torsion_spring_forces(py, vertical_ts, time_delta, new_forces);
-        // self.profiler(py).borrow_mut().check("add material torsion spring forces");
+        self.profiler(py).borrow_mut().check("add material torsion spring forces");
 
         // vertical torsion force comming from actuator
         let vertical_realtime_tunable_ts = torsion_spring::TorsionSpring::new(
             conf.vertical_realtime_tunable_torsion_spirng_k, 0., Coordinate::new(0., 1., 0.),
         );
-        // self.profiler(py).borrow_mut().check("create rtts'");
+        self.profiler(py).borrow_mut().check("create rtts'");
 
-        self.profiler(py).borrow_mut().check("");
         let somites = self.somites(py); 
         let somite_angles = self.somite_angles(py);
         // discrepancy angle is positive only if vertical realtime tunable spring is set, except for when target angle is set
@@ -676,32 +675,20 @@ impl Caterpillar {
         self.profiler(py).borrow_mut().check("calculate discrepancy angle");
 
         // calculate tension applied on each actuator for external reference
-        let realtime_tunable_torsion_spring_tensions = self.calculate_realtime_tunable_torsion_spring_tensions(
-            py,
-            &vertical_realtime_tunable_ts,
-            &vertical_discrepancy_angles,
-        );
-        // self.profiler(py).borrow_mut().check("calculate rtts' forces");
+        let (rtts_tensions, mut new_forces) = self.calculate_and_add_rtts_forces(
+            py, &vertical_realtime_tunable_ts, &vertical_discrepancy_angles, new_forces);
+        self.profiler(py).borrow_mut().check("calculate and add rtts' forces");
 
-        for (i, tension) in realtime_tunable_torsion_spring_tensions.into_iter().enumerate() {
-            self.realtime_tunable_torsion_spring_tensions(py)[i].set(tension);
+        for (tension, tension_memo) in rtts_tensions.into_iter().zip(self.realtime_tunable_torsion_spring_tensions(py).into_iter()) {
+            tension_memo.set(tension);
         }
-        // self.profiler(py).borrow_mut().check("save rtts' forces for reference");
-
-        // add force coming from actuators
-        new_forces = self.add_realtime_tunable_torsion_spring_forces(
-            py,
-            vertical_realtime_tunable_ts,
-            vertical_discrepancy_angles,
-            new_forces,
-        );
-        // self.profiler(py).borrow_mut().check("add rtts' forces");
+        self.profiler(py).borrow_mut().check("save rtts' forces for reference");
 
         self.update_grippers(py);
-        // self.profiler(py).borrow_mut().check("update grippers");
+        self.profiler(py).borrow_mut().check("update grippers");
 
         new_forces = self.add_gripping_forces(py, new_forces);
-        // self.profiler(py).borrow_mut().check("add gripping forces");
+        self.profiler(py).borrow_mut().check("add gripping forces");
 
         // if a somite is on the ground, z-axis negative force is canceled
         self.mask_force_on_landing(py, new_forces)
@@ -802,59 +789,34 @@ impl Caterpillar {
         forces
     }
 
-    fn add_realtime_tunable_torsion_spring_forces(
-        &self,
-        py: Python,
-        t_spring: torsion_spring::TorsionSpring,
-        discrepancy_angles: Vec<f64>,
-        mut forces: Vec<Coordinate>,
-    ) -> Vec<Coordinate> {
-        // discrepancy_angles[i-1] corresponds to a torsion spring on somite i
-        let mut discrepancy_angles_iter = discrepancy_angles.into_iter();
-        for i in 1..(self.somites(py).len() - 1) {
-            // torsion spring at i+1 th somite
-            let (force_on_t, force_on_b) = t_spring.force_on_discrepancy(
-                self.somites(py)[i - 1].get_position(),
-                self.somites(py)[i].get_position(),
-                self.somites(py)[i + 1].get_position(),
-                discrepancy_angles_iter.next().unwrap(),
-            );
-            forces[i - 1] += force_on_b;
-            forces[i] -= force_on_b + force_on_t; // reaction
-            forces[i + 1] += force_on_t;
-        }
-        if let Some(_) = discrepancy_angles_iter.next() {
-            panic!("too many elements in discrepancy_angles");
-        }
-        forces
-    }
-
-    fn calculate_realtime_tunable_torsion_spring_tensions(
+    fn calculate_and_add_rtts_forces(
         &self,
         py: Python,
         t_spring: &torsion_spring::TorsionSpring,
         discrepancy_angles: &Vec<f64>,
-    ) -> Vec<f64> {
+        mut forces: Vec<Coordinate>,
+    ) -> (Vec<f64>, Vec<Coordinate>) {
         // tension i is force applied to torsion spring on i - 1 th somite
-        if discrepancy_angles.len() != self.somites(py).len() - 2 {
-            panic!(
-                "discrepancy_angle should be somites.len() - 2 = {}, got {}",
-                self.somites(py).len() - 2,
-                discrepancy_angles.len()
-            );
+        let somites = self.somites(py);
+
+        if discrepancy_angles.len() != somites.len() - 2 {
+            panic!("discrepancy_angle should be somites.len() - 2 = {}, got {}", somites.len() - 2, discrepancy_angles.len());
         }
+
         let mut tensions = Vec::<f64>::with_capacity(self.somites(py).len() - 2);
+
         for i in 1..(self.somites(py).len() - 1) {
             // torsion spring at i+1 th somite
-            let (force_on_t, _) = t_spring.force_on_discrepancy(
-                self.somites(py)[i - 1].get_position(),
-                self.somites(py)[i].get_position(),
-                self.somites(py)[i + 1].get_position(),
-                discrepancy_angles[i - 1],
-            );
+            let (force_on_t, force_on_b) = t_spring.force_on_discrepancy(
+                somites[i - 1].get_position(), somites[i].get_position(), somites[i + 1].get_position(), discrepancy_angles[i - 1]);
+
             tensions.push(discrepancy_angles[i - 1].signum() * force_on_t.norm());
+
+            forces[i - 1] += force_on_b;
+            forces[i] -= force_on_b + force_on_t; // reaction
+            forces[i + 1] += force_on_t;
         }
-        tensions
+        (tensions, forces)
     }
 
     fn update_grippers(&self, py: Python) {
