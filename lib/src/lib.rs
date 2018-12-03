@@ -9,7 +9,7 @@ extern crate serde_derive;
 use std::f64;
 use std::cell;
 use std::collections;
-use cpython::{PyDict, PyObject, PyResult, PyString, PyTuple, Python, PythonObject, ToPyObject, PyErr};
+use cpython::{PyDict, PyObject, PyResult, PyString, PyBool, PyTuple, Python, PythonObject, ToPyObject, PyErr};
 
 mod phase_oscillator;
 mod torsion_spring;
@@ -22,14 +22,12 @@ mod simulation_export;
 mod calculations;
 mod dynamics;
 mod path_heights;
-mod profile_tools;
 
 use coordinate::Coordinate;
 use somite::Somite;
 use phase_oscillator::PhaseOscillator;
 use dynamics::Dynamics;
 use path_heights::PathHeights;
-use profile_tools::TimeProfiler;
 
 const GRAVITATIONAL_ACCELERATION: f64 = 9.8065;
 
@@ -116,14 +114,15 @@ py_class!(class Caterpillar |py| {
     data path_heights: PathHeights;
     data somite_distances: Vec<cell::Cell<f64>>;
     data somite_angles: Vec<cell::Cell<f64>>;
-    data profiler: cell::RefCell<TimeProfiler<'static>>;
+    data no_step_block: bool;
     def __new__(
         _cls,
         somite_number: usize,
         somites_to_set_oscillater: &PyTuple,
         somites_to_set_gripper: &PyTuple,
         kwargs: Option<&PyDict>,
-        heights:  Option<&PyDict>
+        heights:  Option<&PyDict>,
+        no_step_block: Option<&PyBool>
     ) -> PyResult<Caterpillar> {
         // parse config
         let config = match kwargs {
@@ -135,6 +134,11 @@ py_class!(class Caterpillar |py| {
         let path_heights = match heights {
             Some(heights) => Self::parse_path_heights(py, heights),
             None => PathHeights::new(),
+        };
+
+        let no_blocking = match no_step_block {
+            Some(no_step_block) => no_step_block.is_true(),
+            None => false,
         };
 
         // create a vect of somites objects
@@ -249,7 +253,7 @@ py_class!(class Caterpillar |py| {
             path_heights,
             somite_distances,
             somite_angles,
-            cell::RefCell::new(TimeProfiler::new()),
+            no_blocking,
         )
     }
     def print_config(&self) -> PyResult<PyString> {
@@ -358,10 +362,6 @@ py_class!(class Caterpillar |py| {
         self.update_state(py, dt, self.simulation_protocol(py), self.frame_count(py));
         Ok(py.None())
     }
-    def save_profile(&self, profile_save_file: PyString) -> PyResult<PyObject> {
-        self.profiler(py).borrow_mut().save(&*(profile_save_file.to_string_lossy(py)));
-        Ok(py.None())
-    }
     def steps_with_feedbacks(&self, dt: f64, steps: u8, feedbacks_somites: PyTuple, feedbacks_grippers: PyTuple) -> PyResult<PyObject> {
         // run simulation for several steps of dt using fixed feedbacks
         if feedbacks_somites.len(py) != self.oscillators(py).len() {
@@ -464,7 +464,7 @@ py_class!(class Caterpillar |py| {
     }
     def is_head_blocked(&self) -> PyResult<bool> {
         // return true if head is blocked by an obstacle and cannot move forward anymore
-        Ok(self.dynamics(py).is_blocked_by_obstacle(self.somites(py).last().unwrap(), self.path_heights(py)))
+        Ok(self.dynamics(py).is_blocked_by_obstacle(self.somites(py).last().unwrap(), self.path_heights(py)) && !self.no_step_block(py))
     }
     def get_somite_distances(&self) -> PyResult<PyTuple> {
         // distance between i-th and (i+1)-th somite is saved in the i-th element of self.somite_distances(py)
@@ -556,7 +556,7 @@ impl Caterpillar {
                 // cannot move along the z-axis if gripping
                 new_position.z = s.get_position().z;
             }
-            if dynamics.is_blocked_by_obstacle(s, path_heights) {
+            if dynamics.is_blocked_by_obstacle(s, path_heights) && !self.no_step_block(py) {
                 new_position.x = s.get_position().x.min(new_position.x); // if blocked, cancel the forward move
             }
             s.set_position(new_position);

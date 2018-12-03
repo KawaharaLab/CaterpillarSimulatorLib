@@ -6,7 +6,7 @@ from setuptools_rust import Binding, RustExtension
 
 setup(
     name='caterpillar',
-    version='0.1.6',
+    version='1.2.0',
     author='Matthew Ishige',
     rust_extensions=[
         RustExtension('caterpillar_lib.caterpillar', 'lib/Cargo.toml', binding=Binding.RustCPython)
