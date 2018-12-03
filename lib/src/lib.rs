@@ -117,6 +117,9 @@ py_class!(class Caterpillar |py| {
     data somite_distances: Vec<cell::Cell<f64>>;
     data somite_angles: Vec<cell::Cell<f64>>;
     data profiler: cell::RefCell<TimeProfiler<'static>>;
+    // data prev_angles: Vec<cell::Cell<f64>>;
+    // data current_angles: Vec<cell::Cell<f64>>;
+    data cumulated_energy_consumption: cell::Cell<f64>;
     def __new__(
         _cls,
         somite_number: usize,
@@ -227,6 +230,11 @@ py_class!(class Caterpillar |py| {
         let somite_distances = vec![cell::Cell::<f64>::new(config.somite_radius*2.0); somite_number - 1];
         let somite_angles = vec![cell::Cell::<f64>::new(0.0); somite_number - 2];
 
+        // let prev_angles = vec![cell::Cell::<f64>::new(0.); somite_number - 1];
+        // let current_angles = vec![cell::Cell::<f64>::new(0.); somite_number - 1];
+        let cumulated_energy_consumption = cell::Cell::<f64>::new(0.);
+
+
         Caterpillar::create_instance(
             py,
             config,
@@ -250,6 +258,9 @@ py_class!(class Caterpillar |py| {
             somite_distances,
             somite_angles,
             cell::RefCell::new(TimeProfiler::new()),
+            // prev_angles,
+            // current_angles,
+            cumulated_energy_consumption,
         )
     }
     def print_config(&self) -> PyResult<PyString> {
@@ -484,6 +495,9 @@ py_class!(class Caterpillar |py| {
             )
         )
     }
+    def get_cumulated_energy_consumption(&self) -> PyResult<f64> {
+        Ok(self.cumulated_energy_consumption(py).get())
+    }
 });
 
 /// Implementation of Caterpillar simulator.
@@ -646,6 +660,12 @@ impl Caterpillar {
         // calculate tension applied on each actuator for external reference
         let (rtts_tensions, mut new_forces) = self.calculate_and_add_rtts_forces(
             &vertical_realtime_tunable_ts, &vertical_discrepancy_angles, somites, new_forces);
+
+        // calculate energy consumption and accumulate it
+        let energy_consumption_in_this_step = self.calculate_energy_consumption(&rtts_tensions);
+        // update cumulated energy consumption
+        self.cumulated_energy_consumption(py).set(energy_consumption_in_this_step + self.cumulated_energy_consumption(py).get());
+        
         for (tension, tension_memo) in rtts_tensions.into_iter().zip(self.realtime_tunable_torsion_spring_tensions(py).into_iter()) {
             tension_memo.set(tension);
         }
@@ -760,6 +780,10 @@ impl Caterpillar {
             forces[i + 1] += force_on_t;
         }
         (tensions, forces)
+    }
+
+    fn calculate_energy_consumption(&self, tensions: &Vec<f64>) -> f64{
+        tensions.iter().fold(0., |acc, x| acc + x.abs())        
     }
 
     fn update_grippers(&self, py: Python, somites: &Vec<Somite>, dynamics: &Dynamics, path_heights: &PathHeights) {
